@@ -20,6 +20,7 @@ interface TelegramWebApp {
   BackButton: BackButton;
   MainButton: MainButton;
   HapticFeedback: HapticFeedback;
+  LocationManager?: LocationManager;
   ready(): void;
   expand(): void;
   close(): void;
@@ -82,6 +83,20 @@ interface HapticFeedback {
   impactOccurred(style: "light" | "medium" | "heavy" | "rigid" | "soft"): void;
   notificationOccurred(type: "error" | "success" | "warning"): void;
   selectionChanged(): void;
+}
+
+interface LocationManager {
+  isInited?: boolean;
+  isLocationAvailable?: boolean;
+  isAccessGranted?: boolean;
+  init(callback?: () => void): void;
+  getLocation(callback: (location?: {
+    latitude?: number;
+    longitude?: number;
+    accuracy?: number;
+    accuracy_m?: number;
+  } | null) => void): void;
+  openSettings?(): void;
 }
 
 declare global {
