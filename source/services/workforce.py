@@ -52,6 +52,10 @@ def _notice(key: str, chat_id: int | None, kind: str, payload: dict) -> Notifica
     return NotificationOutboxOrm(dedupe_key=key, chat_id=chat_id, notification_type=kind, payload=payload)
 
 
+def invite_url(code: str) -> str:
+    return f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp={code}"
+
+
 def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
     return bool(row.flags) and row.flags_reviewed_at is None
 
@@ -81,6 +85,96 @@ async def current_consent(session: AsyncSession, employee_id: int, now: datetime
         LocationConsentOrm.withdrawn_at.is_(None),
     ).order_by(LocationConsentOrm.consented_at.desc()).limit(1))
     return text_row, consent is not None
+
+
+async def employee_payload(session: AsyncSession, employee: EmployeeOrm, now: datetime | None = None) -> dict:
+    tabs = {
+        "employee": ["attendance", "outputs", "history"],
+        "manager": ["working", "review", "payroll", "employees"],
+        "director": ["reports", "review", "payroll"],
+    }[employee.role.value]
+    _, accepted = await current_consent(session, employee.id, now or Clock().now())
+    return {"id": employee.id, "code": employee.code, "full_name": employee.full_name,
+            "role": employee.role.value, "tabs": tabs, "has_location_consent": accepted}
+
+
+async def create_invite(session: AsyncSession, employee: EmployeeOrm, actor_id: int | None, now: datetime | None = None) -> str:
+    now = now or Clock().now()
+    rows = (await session.scalars(select(InviteCodeOrm).where(
+        InviteCodeOrm.employee_id == employee.id,
+        InviteCodeOrm.used_at.is_(None),
+        InviteCodeOrm.expires_at > now,
+    ).with_for_update())).all()
+    for row in rows:
+        row.expires_at = now
+    code_value = secrets.token_urlsafe(32)
+    session.add(InviteCodeOrm(employee_id=employee.id, code=code_value, created_by=actor_id,
+                              expires_at=now + timedelta(days=settings.rules.invite_expire_days)))
+    return invite_url(code_value)
+
+
+class AuthService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session = session
+        self.clock = clock or Clock()
+
+    async def redeem_invite(self, data: dict) -> EmployeeOrm:
+        code = data.get("start_param")
+        if not code:
+            raise fail("INVITE_INVALID", 422)
+        now = self.clock.now()
+        telegram_id = int(data["user"]["id"])
+        invite = await self.session.scalar(select(InviteCodeOrm).where(InviteCodeOrm.code == code).with_for_update())
+        if not invite:
+            raise fail("INVITE_INVALID", 422)
+        employee = await self.session.get(EmployeeOrm, invite.employee_id)
+        if not employee or not employee.is_active:
+            raise fail("ACCOUNT_LOCKED", 403)
+        if employee.telegram_id == telegram_id:
+            return employee
+        already = await self.session.scalar(select(EmployeeOrm).where(EmployeeOrm.telegram_id == telegram_id))
+        if already:
+            raise fail("TELEGRAM_ALREADY_LINKED")
+        if invite.used_at:
+            raise fail("INVITE_USED")
+        expires_at = _vn(invite.expires_at)
+        if expires_at <= now:
+            raise fail("INVITE_EXPIRED")
+        employee.telegram_id = telegram_id
+        employee.telegram_username = data["user"].get("username")
+        invite.used_at = now
+        self.session.add(AuditLogOrm(actor_id=None, action="employee_linked",
+                                     entity_type="employee", entity_id=employee.id))
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise fail("TELEGRAM_ALREADY_LINKED") from exc
+        return employee
+
+
+class ConsentService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session = session
+        self.clock = clock or Clock()
+
+    async def withdraw(self, employee: EmployeeOrm) -> None:
+        now = self.clock.now()
+        text, accepted = await current_consent(self.session, employee.id, now)
+        if text and accepted:
+            row = await self.session.scalar(select(LocationConsentOrm).where(
+                LocationConsentOrm.employee_id == employee.id,
+                LocationConsentOrm.consent_version == text.version,
+                LocationConsentOrm.withdrawn_at.is_(None)).order_by(LocationConsentOrm.id.desc()).limit(1))
+            if row:
+                row.withdrawn_at = now
+        managers = (await self.session.scalars(select(EmployeeOrm).where(
+            EmployeeOrm.role == EmployeeRole.manager, EmployeeOrm.is_active.is_(True),
+            EmployeeOrm.telegram_id.is_not(None)))).all()
+        for manager in managers:
+            self.session.add(NotificationOutboxOrm(
+                dedupe_key=f"consent-withdrawn:{employee.id}:{manager.id}:{int(now.timestamp())}",
+                chat_id=manager.telegram_id, notification_type="consent_withdrawn",
+                payload={"employee_id": employee.id, "employee_name": employee.full_name}))
 
 
 class AttendanceService:
@@ -498,11 +592,9 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
     await session.flush()
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=hourly_rate,
                                effective_from=effective_from, created_by=actor.id))
-    code_value = secrets.token_urlsafe(32)
-    session.add(InviteCodeOrm(employee_id=employee.id, code=code_value, created_by=actor.id,
-                              expires_at=Clock().now() + timedelta(days=settings.rules.invite_expire_days)))
+    invite = await create_invite(session, employee, actor.id)
     session.add(AuditLogOrm(actor_id=actor.id, action="employee_created", entity_type="employee", entity_id=employee.id))
-    return employee, f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp={code_value}"
+    return employee, invite
 
 
 def session_dict(row: WorkSessionOrm | None) -> dict | None:

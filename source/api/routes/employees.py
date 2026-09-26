@@ -9,7 +9,7 @@ from source.api.workforce_auth import manager_only
 from source.database.models import EmployeeOrm, RateHistoryOrm, WorkSessionOrm
 from source.domain.workforce_errors import fail
 from source.enums import SessionStatus
-from source.services.workforce import create_employee
+from source.services.workforce import create_employee, create_invite
 
 router = APIRouter()
 
@@ -63,6 +63,18 @@ async def unlock(employee_id: int, _: EmployeeOrm = Depends(manager_only), sessi
             raise fail("EMPLOYEE_NOT_FOUND", 404)
         row.is_active = True
     return {"data": employee_data(row)}
+
+
+@router.post("/{employee_id}/invite")
+async def regenerate_invite(employee_id: int, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
+    async with session.begin():
+        row = await session.get(EmployeeOrm, employee_id)
+        if not row:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        if row.telegram_id:
+            return {"data": {**employee_data(row), "invite_url": None}}
+        invite = await create_invite(session, row, actor.id)
+    return {"data": {**employee_data(row), "invite_url": invite}}
 
 
 @router.get("/{employee_id}/rates")
