@@ -5,11 +5,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 
 from source.schemas.responses import ApiResponse
+from source.domain.workforce_errors import WorkforceError
 
 
 async def error_handler_middleware(request: Request, call_next):
     try:
         return await call_next(request)
+    except WorkforceError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": exc.code, "message": exc.message, "details": exc.details},
+        )
     except StarletteHTTPException as exc:
         payload = ApiResponse(success=False, error=str(exc.detail))
         return JSONResponse(status_code=exc.status_code, content=payload.model_dump())

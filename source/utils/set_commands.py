@@ -50,17 +50,12 @@ async def set_default_commands(bot: Bot) -> None:
     admins = [int(x) for x in settings.tg.admin_ids]
 
     common_commands = [
-        BotCommand(command="start", description="Launch bot"),
-        BotCommand(command="help", description="Instructions for use"),
-        BotCommand(command="profile", description="My profile"),
-        BotCommand(command="language", description="Change language"),
-        BotCommand(command="dialog", description="Open dialog"),
-        BotCommand(command="fsm", description="Start fsm"),
+        BotCommand(command="start", description="Bắt đầu"),
+        BotCommand(command="profile", description="Mở ứng dụng chấm công"),
+        BotCommand(command="help", description="Hướng dẫn"),
     ]
 
-    admin_commands = common_commands + [
-        BotCommand(command="admin", description="Admin command"),
-    ]
+    admin_commands = common_commands
 
     await _safe_delete_commands(bot, BotCommandScopeDefault(), "default")
     await _safe_delete_commands(bot, BotCommandScopeAllPrivateChats(), "all_private")

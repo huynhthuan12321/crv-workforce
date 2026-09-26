@@ -8,7 +8,7 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import users
+from source.api.routes import attendance, consent, employees, history, outputs, payroll, reports, review
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
@@ -25,7 +25,14 @@ def setup_api(app: FastAPI) -> None:
 
     app.include_router(health.router, prefix=API_PREFIX, tags=["Health"])
     app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["Auth"])
-    app.include_router(users.router, prefix=f"{API_PREFIX}/users", tags=["Users"])
+    app.include_router(consent.router, prefix=f"{API_PREFIX}/consent", tags=["Consent"])
+    app.include_router(attendance.router, prefix=f"{API_PREFIX}/attendance", tags=["Attendance"])
+    app.include_router(outputs.router, prefix=f"{API_PREFIX}/outputs", tags=["Outputs"])
+    app.include_router(history.router, prefix=f"{API_PREFIX}/history", tags=["History"])
+    app.include_router(review.router, prefix=f"{API_PREFIX}/review", tags=["Review"])
+    app.include_router(payroll.router, prefix=f"{API_PREFIX}/payroll", tags=["Payroll"])
+    app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
+    app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
 
 
 def create_app(container) -> FastAPI:

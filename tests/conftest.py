@@ -1,6 +1,7 @@
 import os
 
 os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("APP__ENV", "development")
 os.environ.setdefault("TG__BOT_TOKEN", "test")
 os.environ.setdefault("TG__ADMIN_IDS", "[1]")
 os.environ.setdefault("TG__WEBHOOK_USE", "False")
@@ -20,6 +21,10 @@ os.environ.setdefault("REDIS__PORT", "6379")
 os.environ.setdefault("REDIS__USER", "default")
 os.environ.setdefault("REDIS__PASSWORD", "password")
 os.environ.setdefault("REDIS__DB", "0")
+os.environ.setdefault("AUTH__SESSION_SECRET", "test-session-secret-change-me-32chars")
+os.environ.setdefault("WORKSHOP__LAT", "10.0")
+os.environ.setdefault("WORKSHOP__LNG", "106.0")
+os.environ.setdefault("WORKSHOP__RADIUS_M", "100")
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker

@@ -1,4 +1,4 @@
-"""Add bio to users"
+"""Add bio to users."""
 
 from alembic import op
 import sqlalchemy as sa

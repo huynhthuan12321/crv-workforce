@@ -1,4 +1,5 @@
 from typing import Any
+from source.config import settings
 
 
 def cors_settings() -> dict[str, Any]:
@@ -7,6 +8,8 @@ def cors_settings() -> dict[str, Any]:
     Restricts access to Telegram WebApp domains only.
     """
     allowed_origins = [
+        f"https://{settings.app.domain}",
+        "http://localhost:3000",
         "https://web.telegram.org",
         "https://webk.telegram.org",
         "https://webz.telegram.org",

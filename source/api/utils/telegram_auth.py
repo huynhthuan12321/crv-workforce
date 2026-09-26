@@ -78,3 +78,16 @@ def validate_init_data(
         return None
     except Exception:
         return None
+
+
+def validate_init_payload(init_data: str, bot_token: str, max_age_seconds: int = 3600) -> dict[str, Any] | None:
+    """Validate Telegram initData and return user plus trusted start_param."""
+    user = validate_init_data(init_data, bot_token, max_age_seconds)
+    if not user:
+        return None
+    parsed = parse_qs(init_data)
+    return {
+        "user": user,
+        "start_param": parsed.get("start_param", [None])[0],
+        "auth_date": int(parsed["auth_date"][0]),
+    }

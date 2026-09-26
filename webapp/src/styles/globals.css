@@ -13,6 +13,23 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body { background: var(--tg-theme-bg-color, #f3f5f7); color: var(--tg-theme-text-color, #17202a); min-height: 100vh; }
+main { max-width: 680px; margin: 0 auto; padding: max(18px, env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
+header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+header small { color:#68737d; font-weight:700; letter-spacing:.12em; }
+h1 { font-size:24px; margin-top:4px; } h2 { font-size:20px; margin-bottom:14px; }
+.badge { background:#eaf6ef; color:#14733c; border-radius:999px; padding:7px 11px; font-weight:700; }
+.card { background:var(--tg-theme-secondary-bg-color,#fff); border-radius:20px; padding:20px; box-shadow:0 8px 30px rgba(25,40,55,.07); }
+.amount { font-size:36px; font-weight:800; margin-top:20px; color:#16794a; }
+.card small { color:var(--tg-theme-hint-color,#708090); display:block; }
+.card button { width:100%; margin-top:16px; padding:15px; border-radius:14px; font-weight:800; }
+.primary { background:#168a55; color:#fff; } .danger { background:#d94747; color:#fff; }.secondary {background:#eef2f4;color:#26323b}.small{width:auto!important;padding:8px 12px!important;margin:8px 0 0!important}
+input { width:100%; border:1px solid #d8dee3; border-radius:12px; padding:12px; margin:6px 0; background:var(--tg-theme-bg-color,#fff); color:inherit; }
+.row,.list { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 0; border-bottom:1px solid rgba(120,130,140,.16); }.row input{width:90px}.list{align-items:flex-start;flex-direction:column}.list span{color:#68737d}
+.error { color:#bd2424; margin-top:12px; }.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stats b{background:#f1f6f3;padding:16px;border-radius:14px}
+nav { position:fixed; left:50%; transform:translateX(-50%); bottom:0; width:min(680px,100%); display:flex; overflow-x:auto; padding:8px 8px calc(8px + env(safe-area-inset-bottom)); background:var(--tg-theme-secondary-bg-color,#fff); box-shadow:0 -3px 20px rgba(0,0,0,.08); }
+nav button { min-width:92px; padding:11px 8px; color:var(--tg-theme-hint-color,#68737d); font-size:12px; border-radius:12px; } nav button.active { background:#e6f4ec; color:#137344; font-weight:800; }
+
 button {
   cursor: pointer;
   border: none;

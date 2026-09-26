@@ -30,14 +30,17 @@ classifiers = [
 ]
 
 dependencies = [
+    "apscheduler>=3.10.4,<4",
     "aiogram>=3.22.0",
     "aiogram-dialog>=2.4.0",
     "asyncpg>=0.30.0",
     "cachetools>=5.5.2",
     "dishka>=1.6.0",
     "fastapi>=0.116.1",
+    "httpx>=0.28.0",
     "fluent-compiler>=1.1",
     "fluentogram>=1.2.1",
+    "greenlet>=3.2.0",
     "inflect>=7.5.0",
     "loguru>=0.7.3",
     "pydantic>=2.11.7",
