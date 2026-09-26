@@ -7,6 +7,7 @@ from source.api.dependencies import get_session
 from source.api.workforce_auth import manager_or_director
 from source.database.models import EmployeeOrm
 from source.domain.workforce_errors import WorkforceError
+from source.schemas.workforce import DataResponse, WorkSessionOut
 from source.services.workforce import ReviewService, session_dict
 from source.utils.clock import to_vn
 
@@ -50,19 +51,19 @@ async def resolved(_: EmployeeOrm = Depends(manager_or_director), session: Async
     return {"data": await ReviewService(session).list_resolved()}
 
 
-@router.post("/{session_id}/flags-reviewed")
+@router.post("/{session_id}/flags-reviewed", response_model=DataResponse[WorkSessionOut])
 async def mark(session_id: int, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
     row = await ReviewService(session).mark_flags(actor, session_id)
     return {"data": session_dict(row)}
 
 
-@router.post("/{session_id}/close")
+@router.post("/{session_id}/close", response_model=DataResponse[WorkSessionOut])
 async def close(session_id: int, body: CloseBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
     row = await ReviewService(session).close_forgotten(actor, session_id, body.check_out_time, body.reason)
     return {"data": session_dict(row)}
 
 
-@router.patch("/{session_id}")
+@router.patch("/{session_id}", response_model=DataResponse[WorkSessionOut])
 async def edit(session_id: int, body: EditBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
     row = await ReviewService(session).edit_session(actor, session_id, body.check_in_time, body.check_out_time, body.reason)
     return {"data": session_dict(row)}

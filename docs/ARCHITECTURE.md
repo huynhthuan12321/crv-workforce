@@ -65,3 +65,11 @@ Nhân viên / Quản lý / Giám đốc
 | `AlertSettings` | `ALERT__ADMIN_CHAT_ID` | Có | Khớp Phụ lục A. |
 | `SeedSettings` | `SEED__MANAGER_NAME`, `SEED__DIRECTOR_NAME` | Có | Khớp Phụ lục A. |
 | Hệ thống container | `TZ` | Có | Không thuộc Pydantic settings; đặt cho container/OS runtime. |
+ 
+---
+
+## Endpoint thực tế so với prompt
+
+| Nghiệp vụ | Prompt gốc | Endpoint thực tế | Ghi chú |
+|---|---|---|---|
+| Sửa giờ phiên | `PUT /api/sessions/{id}` | `PATCH /api/review/{id}` | Giữ endpoint hiện có để không phá client/API đã triển khai. Chỉ quản lý/giám đốc được gọi. |

@@ -8,12 +8,13 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import attendance, consent, employees, history, outputs, payroll, reports, review
+from source.api.routes import attendance, consent, employees, history, outputs, payroll, reports, review, working
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
 from source.constants import API_REDOC_URL
 from source.domain.workforce_errors import WorkforceError
+from source.services.rate_limit import attendance_rate_limiter
 
 
 async def workforce_error_handler(_, exc: WorkforceError):
@@ -40,10 +41,19 @@ def setup_api(app: FastAPI) -> None:
     app.include_router(attendance.router, prefix=f"{API_PREFIX}/attendance", tags=["Attendance"])
     app.include_router(outputs.router, prefix=f"{API_PREFIX}/outputs", tags=["Outputs"])
     app.include_router(history.router, prefix=f"{API_PREFIX}/history", tags=["History"])
+    app.include_router(working.router, prefix=f"{API_PREFIX}/working-now", tags=["Working"])
     app.include_router(review.router, prefix=f"{API_PREFIX}/review", tags=["Review"])
     app.include_router(payroll.router, prefix=f"{API_PREFIX}/payroll", tags=["Payroll"])
     app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
     app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
+
+    @app.on_event("startup")
+    async def startup_rate_limiter() -> None:
+        await attendance_rate_limiter.start()
+
+    @app.on_event("shutdown")
+    async def shutdown_rate_limiter() -> None:
+        await attendance_rate_limiter.close()
 
 
 def create_app(container) -> FastAPI:

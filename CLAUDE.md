@@ -53,6 +53,7 @@ Lưu ý production: PostgreSQL chỉ được bind localhost, ví dụ `127.0.0.
 # Docker compose
 docker compose config --quiet
 docker compose up --build
+docker compose exec api alembic upgrade head
 
 # Alembic migration
 alembic revision --autogenerate -m "message"
