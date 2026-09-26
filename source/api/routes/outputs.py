@@ -21,6 +21,5 @@ async def form(session_id: int, employee: EmployeeOrm = Depends(employee_only), 
 
 @router.put("/{session_id}")
 async def submit(session_id: int, body: OutputBody, employee: EmployeeOrm = Depends(employee_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        result = await OutputService(session).submit(employee, session_id, body.items)
+    result = await OutputService(session).submit(employee, session_id, body.items)
     return {"data": result}

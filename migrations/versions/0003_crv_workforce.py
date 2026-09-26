@@ -28,8 +28,6 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("created_at", timestamp(), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", timestamp(), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("code"),
-        sa.UniqueConstraint("telegram_id"),
     )
     op.create_index("ix_employees_code", "employees", ["code"], unique=True)
     op.create_index("ix_employees_telegram_id", "employees", ["telegram_id"], unique=True)
@@ -62,7 +60,6 @@ def upgrade() -> None:
         sa.Column("created_at", timestamp(), server_default=sa.func.now(), nullable=False),
         sa.Column("used_at", timestamp(), nullable=True),
         sa.Column("expires_at", timestamp(), nullable=False),
-        sa.UniqueConstraint("code"),
     )
     op.create_index("ix_invite_codes_employee_id", "invite_codes", ["employee_id"])
     op.create_index("ix_invite_codes_code", "invite_codes", ["code"], unique=True)

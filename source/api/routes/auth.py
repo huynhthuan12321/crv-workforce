@@ -42,8 +42,7 @@ async def create_session(body: InitDataRequest, session: AsyncSession = Depends(
 @router.post("/redeem-invite")
 async def redeem_invite(body: InitDataRequest, session: AsyncSession = Depends(get_session)):
     data = _validate(body.init_data)
-    async with session.begin():
-        employee = await AuthService(session).redeem_invite(data)
+    employee = await AuthService(session).redeem_invite(data)
     return {"data": {"token": create_session_token(employee.id),
                      "employee": await employee_payload(session, employee)}}
 

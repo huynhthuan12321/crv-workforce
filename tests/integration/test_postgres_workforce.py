@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from source.database.models import Base, EmployeeOrm, PayBatchOrm, WorkSessionOrm
 from source.domain.workforce_errors import WorkforceError
@@ -29,7 +30,7 @@ async def pg_factory():
     url = os.getenv("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL is not set")
-    engine = create_async_engine(url, pool_pre_ping=True)
+    engine = create_async_engine(url, pool_pre_ping=True, poolclass=NullPool)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -91,9 +92,9 @@ async def test_concurrent_payroll_approve_one(pg_factory):
 
     async def approve_once():
         async with pg_factory() as session:
-            actor = await session.get(EmployeeOrm, manager_id)
             try:
                 async with session.begin():
+                    actor = await session.get(EmployeeOrm, manager_id)
                     return await PayrollService(session).approve_one(actor, employee_id, date(2026, 4, 24))
             except WorkforceError as exc:
                 return exc.code
@@ -119,9 +120,9 @@ async def test_concurrent_close_forgotten(pg_factory):
 
     async def close_once():
         async with pg_factory() as session:
-            actor = await session.get(EmployeeOrm, manager_id)
             try:
                 async with session.begin():
+                    actor = await session.get(EmployeeOrm, manager_id)
                     return await ReviewService(session, FakeClock(dt(20))).close_forgotten(
                         actor, session_id, dt(17), "quên bấm ra ca"
                     )

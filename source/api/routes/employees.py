@@ -39,41 +39,37 @@ async def employees(_: EmployeeOrm = Depends(manager_only), session: AsyncSessio
 
 @router.post("")
 async def add(body: EmployeeBody, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        employee, invite = await create_employee(session, actor, body.code, body.full_name, body.hourly_rate, body.effective_from)
+    employee, invite = await create_employee(session, actor, body.code, body.full_name, body.hourly_rate, body.effective_from)
     return {"data": {**employee_data(employee), "invite_url": invite}}
 
 
 @router.post("/{employee_id}/lock")
 async def lock(employee_id: int, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await session.get(EmployeeOrm, employee_id)
-        opened = await session.scalar(select(WorkSessionOrm.id).where(WorkSessionOrm.employee_id == employee_id, WorkSessionOrm.status == SessionStatus.open))
-        if not row or opened:
-            raise fail("EMPLOYEE_HAS_OPEN_SESSION")
-        row.is_active = False
+    row = await session.get(EmployeeOrm, employee_id)
+    opened = await session.scalar(select(WorkSessionOrm.id).where(WorkSessionOrm.employee_id == employee_id, WorkSessionOrm.status == SessionStatus.open))
+    if not row or opened:
+        raise fail("EMPLOYEE_HAS_OPEN_SESSION")
+    row.is_active = False
     return {"data": employee_data(row)}
 
 
 @router.post("/{employee_id}/unlock")
 async def unlock(employee_id: int, _: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await session.get(EmployeeOrm, employee_id)
-        if not row:
-            raise fail("EMPLOYEE_NOT_FOUND", 404)
-        row.is_active = True
+    row = await session.get(EmployeeOrm, employee_id)
+    if not row:
+        raise fail("EMPLOYEE_NOT_FOUND", 404)
+    row.is_active = True
     return {"data": employee_data(row)}
 
 
 @router.post("/{employee_id}/invite")
 async def regenerate_invite(employee_id: int, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await session.get(EmployeeOrm, employee_id)
-        if not row:
-            raise fail("EMPLOYEE_NOT_FOUND", 404)
-        if row.telegram_id:
-            return {"data": {**employee_data(row), "invite_url": None}}
-        invite = await create_invite(session, row, actor.id)
+    row = await session.get(EmployeeOrm, employee_id)
+    if not row:
+        raise fail("EMPLOYEE_NOT_FOUND", 404)
+    if row.telegram_id:
+        return {"data": {**employee_data(row), "invite_url": None}}
+    invite = await create_invite(session, row, actor.id)
     return {"data": {**employee_data(row), "invite_url": invite}}
 
 
@@ -87,8 +83,7 @@ async def rates(employee_id: int, _: EmployeeOrm = Depends(manager_only), sessio
 async def add_rate(employee_id: int, body: RateBody, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
     if body.effective_from < date.today():
         raise fail("RATE_DATE_IN_PAST", 422)
-    async with session.begin():
-        row = RateHistoryOrm(employee_id=employee_id, hourly_rate=body.hourly_rate,
-                             effective_from=body.effective_from, created_by=actor.id)
-        session.add(row)
+    row = RateHistoryOrm(employee_id=employee_id, hourly_rate=body.hourly_rate,
+                         effective_from=body.effective_from, created_by=actor.id)
+    session.add(row)
     return {"data": {"hourly_rate": row.hourly_rate, "effective_from": row.effective_from}}

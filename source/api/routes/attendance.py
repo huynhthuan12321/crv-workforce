@@ -23,13 +23,11 @@ async def today(employee: EmployeeOrm = Depends(employee_only), session: AsyncSe
 
 @router.post("/check-in")
 async def check_in(body: LocationBody, employee: EmployeeOrm = Depends(employee_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await AttendanceService(session).check_in(employee, body.lat, body.lng, body.accuracy_m)
+    row = await AttendanceService(session).check_in(employee, body.lat, body.lng, body.accuracy_m)
     return {"data": session_dict(row)}
 
 
 @router.post("/check-out")
 async def check_out(body: LocationBody, employee: EmployeeOrm = Depends(employee_only), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await AttendanceService(session).check_out(employee, body.lat, body.lng, body.accuracy_m)
+    row = await AttendanceService(session).check_out(employee, body.lat, body.lng, body.accuracy_m)
     return {"data": session_dict(row)}

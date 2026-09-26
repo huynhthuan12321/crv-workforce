@@ -28,8 +28,7 @@ async def detail(employee_id: int, date: date, _: EmployeeOrm = Depends(manager_
 
 @router.post("/approve")
 async def approve(body: ApproveBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        batches = await PayrollService(session).approve(actor, body.employee_ids, body.date)
+    batches = await PayrollService(session).approve(actor, body.employee_ids, body.date)
     return {"data": [{
         "employee_id": batch.employee_id,
         "batch_id": batch.id,

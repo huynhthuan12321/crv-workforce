@@ -29,13 +29,11 @@ async def accept(body: ConsentBody, employee: EmployeeOrm = Depends(get_current_
     text, _ = await current_consent(session, employee.id, now)
     if not text or body.version != text.version:
         raise fail("CONSENT_VERSION_INVALID", 422)
-    async with session.begin():
-        session.add(LocationConsentOrm(employee_id=employee.id, consent_version=body.version, consented_at=now))
+    session.add(LocationConsentOrm(employee_id=employee.id, consent_version=body.version, consented_at=now))
     return {"data": {"accepted": True, "version": body.version}}
 
 
 @router.post("/withdraw")
 async def withdraw(employee: EmployeeOrm = Depends(get_current_employee), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        await ConsentService(session).withdraw(employee)
+    await ConsentService(session).withdraw(employee)
     return {"data": {"accepted": False}}
