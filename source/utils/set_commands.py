@@ -51,8 +51,6 @@ async def set_default_commands(bot: Bot) -> None:
 
     common_commands = [
         BotCommand(command="start", description="Bắt đầu"),
-        BotCommand(command="profile", description="Mở ứng dụng chấm công"),
-        BotCommand(command="help", description="Hướng dẫn"),
     ]
 
     admin_commands = common_commands

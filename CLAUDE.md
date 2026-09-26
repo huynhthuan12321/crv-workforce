@@ -62,3 +62,5 @@ alembic downgrade -1
 ```
 
 Ghi chú migration: bảng `users` là bảng legacy của template, được giữ ở migration 0001–0002 để không phá lịch sử migration; schema CRV không dùng bảng này nên `migrations/env.py` bỏ qua bảng `users` khi `alembic check` / autogenerate.
+
+Ghi chú seed: mỗi lần chạy `scripts/db_seed.py` sẽ tạo link mời MỚI và vô hiệu link cũ chưa dùng của người chưa liên kết Telegram.

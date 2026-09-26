@@ -1,6 +1,6 @@
 from datetime import time
 
-from pydantic import PostgresDsn, SecretStr, field_validator
+from pydantic import PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 
@@ -73,13 +73,6 @@ class AuthSettings(NestedSettings):
     session_secret: SecretStr = SecretStr("development-secret-change-me-32chars")
     dev_bypass: bool = False
 
-    @field_validator("session_secret")
-    @classmethod
-    def strong_secret(cls, value: SecretStr) -> SecretStr:
-        if len(value.get_secret_value()) < 32:
-            raise ValueError("AUTH__SESSION_SECRET must contain at least 32 characters")
-        return value
-
 
 class WorkshopSettings(NestedSettings):
     lat: float
@@ -135,13 +128,38 @@ class Settings(BaseSettings):
     def environment(self) -> str:
         return self.app.env
 
-    @field_validator("auth")
-    @classmethod
-    def production_auth_is_safe(cls, auth: AuthSettings, info):
-        app = info.data.get("app")
-        if app and app.env == "production" and auth.dev_bypass:
-            raise ValueError("AUTH__DEV_BYPASS is forbidden in production")
-        return auth
+    @model_validator(mode="after")
+    def production_settings_are_safe(self):
+        errors: list[str] = []
+        session_secret = self.auth.session_secret.get_secret_value()
+
+        if len(session_secret) < 32:
+            errors.append("AUTH__SESSION_SECRET must contain at least 32 characters")
+
+        if self.app.env == "production":
+            db_password = self.db.password.get_secret_value()
+            redis_password = self.redis.password.get_secret_value()
+            webhook_secret = self.webhook.secret.get_secret_value()
+            lark_secret = self.lark.sync_secret.get_secret_value()
+
+            if self.auth.dev_bypass:
+                errors.append("AUTH__DEV_BYPASS is forbidden in production")
+            if db_password == "password":
+                errors.append('DB__PASSWORD must not be "password" in production')
+            if redis_password == "password":
+                errors.append('REDIS__PASSWORD must not be "password" in production')
+            if "change-me" in session_secret:
+                errors.append('AUTH__SESSION_SECRET must not contain "change-me" in production')
+            if lark_secret.startswith("development-"):
+                errors.append("LARK__SYNC_SECRET must not use a development-* sample value in production")
+            if webhook_secret.startswith("development-"):
+                errors.append("WEBHOOK__SECRET must not use a development-* sample value in production")
+            if not self.webapp.url.startswith("https://"):
+                errors.append("WEBAPP__URL must start with https:// in production")
+
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 settings = Settings()

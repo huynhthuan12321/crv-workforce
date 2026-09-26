@@ -144,6 +144,34 @@ def test_settings_rejects_dev_bypass_in_production(monkeypatch):
 
 
 @pytest.mark.unit
+def test_settings_rejects_unsafe_production_env_and_lists_all_variables(monkeypatch):
+    monkeypatch.setenv("APP__ENV", "production")
+    monkeypatch.setenv("TG__BOT_TOKEN", "123:test")
+    monkeypatch.setenv("WORKSHOP__LAT", "10")
+    monkeypatch.setenv("WORKSHOP__LNG", "106")
+    monkeypatch.setenv("DB__PASSWORD", "password")
+    monkeypatch.setenv("REDIS__PASSWORD", "password")
+    monkeypatch.setenv("AUTH__SESSION_SECRET", "this-change-me-secret-is-long-enough-32")
+    monkeypatch.setenv("LARK__SYNC_SECRET", "development-lark-secret")
+    monkeypatch.setenv("WEBHOOK__SECRET", "development-webhook-secret")
+    monkeypatch.setenv("WEBAPP__URL", "http://example.test")
+
+    with pytest.raises(ValidationError) as exc:
+        Settings()
+
+    message = str(exc.value)
+    for variable in [
+        "DB__PASSWORD",
+        "REDIS__PASSWORD",
+        "AUTH__SESSION_SECRET",
+        "LARK__SYNC_SECRET",
+        "WEBHOOK__SECRET",
+        "WEBAPP__URL",
+    ]:
+        assert variable in message
+
+
+@pytest.mark.unit
 async def test_consent_state_and_withdraw_two_managers(session):
     employee = await add_employee(session, "NV001", 1001)
     manager1 = await add_employee(session, "QL001", 2001, EmployeeRole.manager)

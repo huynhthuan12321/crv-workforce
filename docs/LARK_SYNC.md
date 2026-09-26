@@ -76,13 +76,13 @@ Giống `session_closed`, bổ sung thông tin thay đổi:
   "event_id": "uuid",
   "session_id": 123,
   "items": {
-    "bot": 5,
-    "xuc_xich": 3,
-    "pho_mai": 2,
-    "cha_bong": 1,
-    "sot_cam": 1,
-    "sot_trang": 0,
-    "bo": 0
+    "BOT": 5,
+    "XUC_XICH": 3,
+    "PHO_MAI": 2,
+    "CHA_BONG": 1,
+    "SOT_CAM": 1,
+    "SOT_TRANG": 0,
+    "BO": 0
   }
 }
 ```
