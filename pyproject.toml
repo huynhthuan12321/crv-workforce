@@ -143,6 +143,7 @@ addopts = [
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
+    "postgres: PostgreSQL integration tests",
     "e2e: End-to-end tests",
 ]
 

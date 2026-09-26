@@ -1,7 +1,8 @@
 from collections.abc import Callable
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,10 +17,24 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_employee(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: AsyncSession = Depends(get_session),
 ) -> EmployeeOrm:
     if not credentials:
+        dev_telegram_id = request.headers.get("X-Dev-Telegram-Id")
+        if settings.app.env == "development" and settings.auth.dev_bypass and dev_telegram_id:
+            logger.warning("AUTH__DEV_BYPASS used for telegram_id={}", dev_telegram_id)
+            try:
+                telegram_id = int(dev_telegram_id)
+            except ValueError as exc:
+                raise fail("SESSION_EXPIRED", 401) from exc
+            employee = await session.scalar(select(EmployeeOrm).where(EmployeeOrm.telegram_id == telegram_id))
+            if not employee:
+                raise fail("NOT_REGISTERED", 403)
+            if not employee.is_active:
+                raise fail("ACCOUNT_LOCKED", 403)
+            return employee
         raise fail("SESSION_EXPIRED", 401)
     employee_id = decode_session_token(credentials.credentials)
     employee = await session.get(EmployeeOrm, employee_id)

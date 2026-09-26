@@ -13,6 +13,16 @@ from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
 from source.constants import API_REDOC_URL
+from source.domain.workforce_errors import WorkforceError
+
+
+async def workforce_error_handler(_, exc: WorkforceError):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": exc.code, "message": exc.message, "details": exc.details},
+    )
 
 
 def setup_api(app: FastAPI) -> None:
@@ -21,6 +31,7 @@ def setup_api(app: FastAPI) -> None:
 
     app.add_middleware(CORSMiddleware, **cors_settings())
 
+    app.add_exception_handler(WorkforceError, workforce_error_handler)
     app.middleware("http")(error_handler_middleware)
 
     app.include_router(health.router, prefix=API_PREFIX, tags=["Health"])

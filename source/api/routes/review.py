@@ -52,20 +52,17 @@ async def resolved(_: EmployeeOrm = Depends(manager_or_director), session: Async
 
 @router.post("/{session_id}/flags-reviewed")
 async def mark(session_id: int, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await ReviewService(session).mark_flags(actor, session_id)
+    row = await ReviewService(session).mark_flags(actor, session_id)
     return {"data": session_dict(row)}
 
 
 @router.post("/{session_id}/close")
 async def close(session_id: int, body: CloseBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await ReviewService(session).close_forgotten(actor, session_id, body.check_out_time, body.reason)
+    row = await ReviewService(session).close_forgotten(actor, session_id, body.check_out_time, body.reason)
     return {"data": session_dict(row)}
 
 
 @router.patch("/{session_id}")
 async def edit(session_id: int, body: EditBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    async with session.begin():
-        row = await ReviewService(session).edit_session(actor, session_id, body.check_in_time, body.check_out_time, body.reason)
+    row = await ReviewService(session).edit_session(actor, session_id, body.check_in_time, body.check_out_time, body.reason)
     return {"data": session_dict(row)}
