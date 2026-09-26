@@ -18,14 +18,17 @@ from source.database.models import (
     EmployeeOrm,
     LocationConsentOrm,
     OutputLogOrm,
+    OutputItemOrm,
     PayBatchOrm,
     ProductOrm,
     RateHistoryOrm,
     WorkSessionOrm,
+    NotificationOutboxOrm,
 )
 from source.enums import EmployeeRole, SessionStatus
 from source.services import workforce as workforce_module
 from source.utils.clock import FakeClock, VIETNAM_TZ
+from source.workers import reminder_job, notification_text
 
 
 pytestmark = pytest.mark.postgres
@@ -271,3 +274,88 @@ async def test_http_business_error_rolls_back(api_client, pg_factory):
         )
         assert before == after
         assert open_count == 1
+
+
+async def test_today_returns_vn_timezone_and_reminder_uses_vn_time(api_client, pg_factory):
+    check_in = datetime(2026, 4, 24, 8, 12, tzinfo=VIETNAM_TZ)
+    async with pg_factory() as session:
+        async with session.begin():
+            session.add(ConsentTextOrm(version=1, content="consent", effective_at=NOW - timedelta(days=1)))
+            employee = await seed_actor(session, "NVTZ", EmployeeRole.employee, 4001)
+            await seed_rate(session, employee.id)
+            await seed_consent(session, employee.id)
+            row = work_session(employee.id, status=SessionStatus.open, check_in=check_in, check_out=None)
+            session.add(row)
+            employee_id = employee.id
+
+    response = api_client.get("/api/attendance/today", headers=auth_headers(employee_id))
+    assert response.status_code == 200, response.text
+    check_in_at = response.json()["data"]["open_session"]["check_in_at"]
+    assert check_in_at.endswith("+07:00")
+    assert "T08:12:" in check_in_at
+
+    await reminder_job(pg_factory, FakeClock(datetime(2026, 4, 24, 18, 0, tzinfo=VIETNAM_TZ)))
+    async with pg_factory() as session:
+        notice = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.notification_type == "checkout_reminder"))
+        assert notice is not None
+        assert "08:12" in notification_text(notice)
+
+
+async def test_report_salary_uses_daily_paid_plus_pending_not_period_raw_ceiling(api_client, pg_factory):
+    day1 = date(2026, 4, 24)
+    day2 = date(2026, 4, 25)
+    async with pg_factory() as session:
+        async with session.begin():
+            director = await seed_actor(session, "GD001", EmployeeRole.director, 5001)
+            employee = await seed_actor(session, "NVREP", EmployeeRole.employee, 5002)
+            s1 = work_session(employee.id, check_in=datetime(2026, 4, 24, 8, 0, tzinfo=VIETNAM_TZ),
+                              check_out=datetime(2026, 4, 24, 13, 23, tzinfo=VIETNAM_TZ))
+            s1.amount_raw = Decimal("161500")
+            s2 = work_session(employee.id, check_in=datetime(2026, 4, 25, 8, 0, tzinfo=VIETNAM_TZ),
+                              check_out=datetime(2026, 4, 25, 13, 5, tzinfo=VIETNAM_TZ))
+            s2.amount_raw = Decimal("152500")
+            session.add_all([s1, s2])
+            await session.flush()
+            batch = PayBatchOrm(employee_id=employee.id, work_date=day1, batch_no=1, amount=162000,
+                                day_total_rounded_at_approval=162000, status="paid", approved_by=director.id,
+                                approved_at=NOW)
+            session.add(batch)
+            await session.flush()
+            s1.pay_batch_id = batch.id
+            director_id = director.id
+
+    response = api_client.get("/api/reports/summary?period=week&date=2026-04-24", headers=auth_headers(director_id))
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["paid"] == 162000
+    assert data["pending"] == 153000
+    assert data["total"] == 315000
+    assert data["total"] != 314000
+
+
+async def test_history_grouped_by_day_shows_batch_money_and_output(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            session.add(ConsentTextOrm(version=1, content="consent", effective_at=NOW - timedelta(days=1)))
+            product = ProductOrm(code="BOT", name="Bột", kg_per_bag=Decimal("1.20"), sort_order=1)
+            session.add(product)
+            employee = await seed_actor(session, "NVHIS", EmployeeRole.employee, 6001)
+            manager = await seed_actor(session, "QLHIS", EmployeeRole.manager, 6002)
+            row = work_session(employee.id, check_in=NOW.replace(hour=7), check_out=NOW.replace(hour=8))
+            session.add(row)
+            await session.flush()
+            output = OutputLogOrm(work_session_id=row.id, submitted_at=NOW, locked_at=NOW + timedelta(minutes=10))
+            session.add(output)
+            await session.flush()
+            session.add(OutputItemOrm(output_log_id=output.id, product_id=product.id, bags=5, kg=Decimal("6.00")))
+            employee_id, manager_id = employee.id, manager.id
+
+    response = api_client.post("/api/payroll/approve", json={"date": str(NOW.date()), "employee_ids": [employee_id]},
+                               headers=auth_headers(manager_id))
+    assert response.status_code == 200, response.text
+
+    response = api_client.get("/api/history", headers=auth_headers(employee_id))
+    assert response.status_code == 200, response.text
+    day = response.json()["data"]["days"][0]
+    assert day["batches"][0]["amount"] == 30000
+    assert day["batches"][0]["sessions"][0]["output"][0]["bags"] == 5

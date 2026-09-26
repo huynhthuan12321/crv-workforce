@@ -17,6 +17,7 @@ from source.database.models import (
 from source.domain.workforce_errors import fail
 from source.enums import EmployeeRole, SessionStatus
 from source.utils.clock import Clock, VIETNAM_TZ, to_vn
+from source.utils.formatting import fmt_date_vn, fmt_time_vn, iso_vn
 
 
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -54,6 +55,10 @@ def _notice(key: str, chat_id: int | None, kind: str, payload: dict) -> Notifica
 
 def invite_url(code: str) -> str:
     return f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp={code}"
+
+
+def _tab_button(text: str, tab: str) -> dict:
+    return {"text": text, "url": f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp=tab_{tab}"}
 
 
 def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
@@ -253,6 +258,32 @@ class AttendanceService:
                 "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0)}
 
 
+class WorkingService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session, self.clock = session, clock or Clock()
+
+    async def working_now(self) -> list[dict]:
+        now = _vn(self.clock.now())
+        rows = list((await self.session.scalars(select(WorkSessionOrm).where(
+            WorkSessionOrm.status == SessionStatus.open,
+            WorkSessionOrm.work_date == now.date(),
+        ).order_by(WorkSessionOrm.check_in_at))).all())
+        result = []
+        for row in rows:
+            employee = await self.session.get(EmployeeOrm, row.employee_id)
+            check_in = _vn(row.check_in_at)
+            result.append({
+                "session_id": row.id,
+                "employee_id": row.employee_id,
+                "code": employee.code if employee else "",
+                "full_name": employee.full_name if employee else "",
+                "check_in_at": iso_vn(row.check_in_at),
+                "minutes_worked": max(0, int((now - check_in).total_seconds() // 60)),
+                "flags": row.flags or [],
+            })
+        return result
+
+
 class OutputService:
     def __init__(self, session: AsyncSession, clock: Clock | None = None):
         self.session, self.clock = session, clock or Clock()
@@ -270,6 +301,7 @@ class OutputService:
         locked_at = _vn(output.locked_at)
         return {"session_id": session_id, "locked": now >= locked_at,
                 "seconds_remaining": max(0, int((locked_at - now).total_seconds())),
+                "locked_at": iso_vn(output.locked_at),
                 "items": [{"code": p.code, "name": p.name, "kg_per_bag": float(p.kg_per_bag),
                            "bags": items[p.id].bags if p.id in items else 0} for p in products]}
 
@@ -297,7 +329,7 @@ class OutputService:
         output.submitted_at = now
         self.session.add(_event("output_submitted", {"session_id": session_id, "items": values}))
         await self.session.flush()
-        return {"session_id": session_id, "total_kg": float(total), "locked_at": output.locked_at}
+        return {"session_id": session_id, "total_kg": float(total), "locked_at": iso_vn(output.locked_at)}
 
 
 class ReviewService:
@@ -358,7 +390,11 @@ class ReviewService:
         self.session.add(_event("session_closed", {"session_id": row.id, "employee_id": row.employee_id}))
         employee = await self.session.get(EmployeeOrm, row.employee_id)
         notice = _notice(f"forgot-closed:{row.id}", employee.telegram_id if employee else None,
-                         "forgot_session_closed", {"session_id": row.id, "work_date": str(row.work_date)})
+                         "forgot_session_closed", {"session_id": row.id,
+                                                   "work_date": fmt_date_vn(row.work_date),
+                                                   "closed_at": iso_vn(now),
+                                                   "closed_time": fmt_time_vn(now),
+                                                   "button": _tab_button("Mở ứng dụng", "outputs")})
         if notice:
             self.session.add(notice)
         await self.session.flush()
@@ -561,7 +597,8 @@ class PayrollService:
                                                "amount": amount, "session_ids": [x.id for x in eligible]}))
         employee = await self.session.get(EmployeeOrm, employee_id)
         notice = _notice(f"batch-paid:{batch.id}", employee.telegram_id if employee else None,
-                         "batch_paid", {"batch_no": batch_no, "date": str(day), "amount": amount, "paid_total": paid + amount})
+                         "batch_paid", {"batch_no": batch_no, "date": fmt_date_vn(day), "amount": amount,
+                                        "paid_total": paid + amount, "button": _tab_button("Mở ứng dụng", "history")})
         if notice:
             self.session.add(notice)
         return batch
@@ -580,6 +617,175 @@ class PayrollService:
             raise fail("NO_ELIGIBLE_SESSIONS")
         await self.session.flush()
         return batches
+
+
+class HistoryService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session, self.clock = session, clock or Clock()
+
+    def _pending_reason(self, row: WorkSessionOrm) -> str | None:
+        if row.pay_batch_id:
+            return None
+        if row.status == SessionStatus.open:
+            return "dang_mo"
+        if row.status == SessionStatus.needs_review:
+            return "cho_xu_ly"
+        if _has_unreviewed_flags(row):
+            return "co_co_gps"
+        return "cho_duyet"
+
+    async def _output_items(self, session_id: int) -> list[dict]:
+        rows = (await self.session.execute(select(
+            ProductOrm.code, ProductOrm.name,
+            func.coalesce(OutputItemOrm.bags, 0), func.coalesce(OutputItemOrm.kg, 0),
+        ).join(OutputItemOrm, OutputItemOrm.product_id == ProductOrm.id)
+         .join(OutputLogOrm, OutputLogOrm.id == OutputItemOrm.output_log_id)
+         .where(OutputLogOrm.work_session_id == session_id)
+         .order_by(ProductOrm.sort_order))).all()
+        return [{"code": x[0], "name": x[1], "bags": int(x[2]), "kg": float(x[3])} for x in rows]
+
+    async def history(self, employee: EmployeeOrm, start: date | None, end: date | None) -> dict:
+        today = _vn(self.clock.now()).date()
+        end = end or today
+        start = start or (end - timedelta(days=29))
+        sessions = list((await self.session.scalars(select(WorkSessionOrm).where(
+            WorkSessionOrm.employee_id == employee.id,
+            WorkSessionOrm.work_date.between(start, end),
+        ).order_by(WorkSessionOrm.work_date.desc(), WorkSessionOrm.check_in_at))).all())
+        batches = list((await self.session.scalars(select(PayBatchOrm).where(
+            PayBatchOrm.employee_id == employee.id,
+            PayBatchOrm.work_date.between(start, end),
+        ).order_by(PayBatchOrm.work_date.desc(), PayBatchOrm.batch_no))).all())
+        by_batch = {batch.id: [] for batch in batches}
+        unpaid_by_day: dict[date, list[dict]] = {}
+        for row in sessions:
+            data = session_dict(row) | {
+                "pay_batch_id": row.pay_batch_id,
+                "pending_reason": self._pending_reason(row),
+                "output": await self._output_items(row.id),
+            }
+            if row.pay_batch_id in by_batch:
+                by_batch[row.pay_batch_id].append(data)
+            elif row.pay_batch_id is None:
+                unpaid_by_day.setdefault(row.work_date, []).append(data)
+        days = []
+        all_days = sorted({*(row.work_date for row in sessions), *(b.work_date for b in batches)}, reverse=True)
+        for day in all_days:
+            day_batches = []
+            for batch in [b for b in batches if b.work_date == day]:
+                day_batches.append({
+                    "id": batch.id,
+                    "batch_no": batch.batch_no,
+                    "amount": batch.amount,
+                    "approved_at": iso_vn(batch.approved_at),
+                    "sessions": by_batch.get(batch.id, []),
+                })
+            paid = sum(b["amount"] for b in day_batches)
+            eligible_raw = sum((row.amount_raw or Decimal(0) for row in sessions
+                                if row.work_date == day and row.pay_batch_id is None
+                                and row.status == SessionStatus.closed and not _has_unreviewed_flags(row)), Decimal(0))
+            pending = 0
+            if eligible_raw:
+                paid_raw = await PayrollService(self.session)._paid_sessions_raw(employee.id, day)
+                pending = max(0, ceil_money(paid_raw + eligible_raw) - paid)
+            days.append({
+                "date": day,
+                "total_amount": paid + pending,
+                "batches": day_batches,
+                "unpaid_sessions": unpaid_by_day.get(day, []),
+            })
+        return {"from": start, "to": end, "days": days}
+
+
+class ReportService:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    @staticmethod
+    def bounds(period: str, day: date) -> tuple[date, date]:
+        if period == "day":
+            return day, day
+        if period == "week":
+            start = day - timedelta(days=day.weekday())
+            return start, start + timedelta(days=6)
+        start = day.replace(day=1)
+        following = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        return start, following - timedelta(days=1)
+
+    async def _salary_for_days(self, start: date, end: date, employee_id: int | None = None) -> dict[date, dict[str, int]]:
+        employees = [employee_id] if employee_id else list((await self.session.scalars(
+            select(EmployeeOrm.id).where(EmployeeOrm.role == EmployeeRole.employee)
+        )).all())
+        result: dict[date, dict[str, int]] = {}
+        current = start
+        while current <= end:
+            result[current] = {"paid": 0, "pending": 0, "total": 0}
+            for emp_id in employees:
+                paid = int(await self.session.scalar(select(func.coalesce(func.sum(PayBatchOrm.amount), 0)).where(
+                    PayBatchOrm.employee_id == emp_id, PayBatchOrm.work_date == current)) or 0)
+                raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(
+                    WorkSessionOrm.employee_id == emp_id,
+                    WorkSessionOrm.work_date == current,
+                    WorkSessionOrm.status == SessionStatus.closed,
+                )) or 0)
+                pending = max(0, ceil_money(raw) - paid) if raw else 0
+                result[current]["paid"] += paid
+                result[current]["pending"] += pending
+            result[current]["total"] = result[current]["paid"] + result[current]["pending"]
+            current += timedelta(days=1)
+        return result
+
+    async def summary(self, period: str, day: date, employee_id: int | None = None) -> dict:
+        start, end = self.bounds(period, day)
+        filters = [WorkSessionOrm.work_date.between(start, end), WorkSessionOrm.status == SessionStatus.closed]
+        if employee_id:
+            filters.append(WorkSessionOrm.employee_id == employee_id)
+        minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
+        production = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
+            func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
+            .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
+        salary_days = await self._salary_for_days(start, end, employee_id)
+        paid = sum(x["paid"] for x in salary_days.values())
+        pending = sum(x["pending"] for x in salary_days.values())
+        return {"from": start, "to": end, "minutes": minutes,
+                "salary": {"paid": paid, "pending": pending, "total": paid + pending},
+                "paid": paid, "pending": pending, "total": paid + pending,
+                "bags": int(production[0]), "kg": float(production[1])}
+
+    async def products(self, period: str, day: date, employee_id: int | None = None) -> list[dict]:
+        start, end = self.bounds(period, day)
+        products = list((await self.session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
+        result = []
+        for product in products:
+            filters = [WorkSessionOrm.work_date.between(start, end), OutputItemOrm.product_id == product.id]
+            if employee_id:
+                filters.append(WorkSessionOrm.employee_id == employee_id)
+            bags, kg = (await self.session.execute(select(
+                func.coalesce(func.sum(OutputItemOrm.bags), 0),
+                func.coalesce(func.sum(OutputItemOrm.kg), 0),
+            ).select_from(OutputItemOrm).join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
+            result.append({"code": product.code, "name": product.name, "bags": int(bags), "kg": float(kg)})
+        return result
+
+    async def timeseries(self, period: str, day: date, employee_id: int | None = None) -> list[dict]:
+        start, end = self.bounds(period, day)
+        salary_days = await self._salary_for_days(start, end, employee_id)
+        rows = []
+        current = start
+        while current <= end:
+            filters = [WorkSessionOrm.work_date == current, WorkSessionOrm.status == SessionStatus.closed]
+            if employee_id:
+                filters.append(WorkSessionOrm.employee_id == employee_id)
+            minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
+            bags, kg = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
+                func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
+                .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
+            salary = salary_days[current]
+            rows.append({"date": current, "minutes": minutes, "salary": salary["total"],
+                         "paid": salary["paid"], "pending": salary["pending"],
+                         "bags": int(bags), "kg": float(kg)})
+            current += timedelta(days=1)
+        return rows
 
 
 async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, name: str,
@@ -601,7 +807,7 @@ def session_dict(row: WorkSessionOrm | None) -> dict | None:
     if not row:
         return None
     return {"id": row.id, "employee_id": row.employee_id, "work_date": str(row.work_date),
-            "check_in_at": row.check_in_at, "check_out_at": row.check_out_at,
+            "check_in_at": iso_vn(row.check_in_at), "check_out_at": iso_vn(row.check_out_at),
             "minutes": row.minutes, "rate_snapshot": row.rate_snapshot,
             "amount_raw": float(row.amount_raw) if row.amount_raw is not None else None,
             "status": row.status.value, "flags": row.flags or [],

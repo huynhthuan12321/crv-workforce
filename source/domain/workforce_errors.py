@@ -33,6 +33,7 @@ MESSAGES = {
     "SESSION_OPEN": "Không thể sửa phiên đang mở.",
     "SESSION_OVERLAP": "Khoảng thời gian bị chồng lấn với phiên khác.",
     "NO_ELIGIBLE_SESSIONS": "Không có dữ liệu để duyệt.",
+    "TOO_FAST": "Thao tác quá nhanh, vui lòng thử lại sau.",
 }
 
 
