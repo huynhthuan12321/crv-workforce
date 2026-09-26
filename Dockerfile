@@ -24,6 +24,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --chown=appuser:appgroup source/ ./source/
 COPY --chown=appuser:appgroup migrations/ ./migrations/
 COPY --chown=appuser:appgroup alembic.ini ./
+COPY --chown=appuser:appgroup scripts/ ./scripts/
+COPY --chown=appuser:appgroup docs/consent_v1.md ./docs/consent_v1.md
 
 RUN mkdir -p /app/source/data/error_logs /app/source/data/full_logs && \
     chown -R appuser:appgroup /app/source/data
@@ -31,6 +33,7 @@ RUN mkdir -p /app/source/data/error_logs /app/source/data/full_logs && \
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
