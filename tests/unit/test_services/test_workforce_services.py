@@ -73,13 +73,13 @@ async def add_consent(session, employee: EmployeeOrm, now: datetime = dt(6, 0)) 
 
 async def add_products(session) -> None:
     products = [
-        ("bot", "Bột", Decimal("1.2"), 1),
-        ("xuc_xich", "Xúc xích", Decimal("1"), 2),
-        ("pho_mai", "Phô mai", Decimal("1"), 3),
-        ("cha_bong", "Chà bông", Decimal("1"), 4),
-        ("sot_cam", "Sốt cam", Decimal("2"), 5),
-        ("sot_trang", "Sốt trắng", Decimal("2"), 6),
-        ("bo", "Bơ", Decimal("2"), 7),
+        ("BOT", "Bột", Decimal("1.2"), 1),
+        ("XUC_XICH", "Xúc xích", Decimal("1"), 2),
+        ("PHO_MAI", "Phô mai", Decimal("1"), 3),
+        ("CHA_BONG", "Chà bông", Decimal("1"), 4),
+        ("SOT_CAM", "Sốt cam", Decimal("2"), 5),
+        ("SOT_TRANG", "Sốt trắng", Decimal("2"), 6),
+        ("BO", "Bơ", Decimal("2"), 7),
     ]
     for code, name, kg, order in products:
         session.add(ProductOrm(code=code, name=name, kg_per_bag=kg, sort_order=order))
@@ -226,7 +226,7 @@ async def test_output_total_lock_boundary_and_owner(session):
     session.add(OutputLogOrm(work_session_id=work.id, locked_at=dt(11, 45)))
     await session.flush()
 
-    values = {"bot": 5, "xuc_xich": 3, "pho_mai": 2, "cha_bong": 1, "sot_cam": 1}
+    values = {"BOT": 5, "XUC_XICH": 3, "PHO_MAI": 2, "CHA_BONG": 1, "SOT_CAM": 1}
     result = await OutputService(session, FakeClock(dt(11, 44, 59))).submit(owner, work.id, values)
     assert result["total_kg"] == 14.0
     assert len((await session.scalars(select(OutputItemOrm))).all()) == 7

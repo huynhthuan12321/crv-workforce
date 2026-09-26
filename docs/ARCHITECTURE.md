@@ -41,6 +41,8 @@ Nhân viên / Quản lý / Giám đốc
 - Mọi mốc thời gian lấy từ **đồng hồ server**, không bao giờ lấy từ điện thoại.
 - Lark **không bao giờ** là nơi ghi dữ liệu gốc.
 
+**Ghi chú vận hành thông báo:** hệ thống không dùng bảng `notification_log` riêng; chống gửi trùng bằng `notification_outbox.dedupe_key` có unique constraint.
+
 ---
 
 ## Bảng ánh xạ biến môi trường thực tế

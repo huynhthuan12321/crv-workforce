@@ -43,6 +43,10 @@ npm run dev
 python -m compileall -q source migrations scripts tests
 python -m pytest
 
+# Test tích hợp PostgreSQL (cần DB thật)
+$env:TEST_DATABASE_URL="postgresql+asyncpg://default:password@localhost:5432/crv_workforce_test"
+python -m pytest -m postgres
+
 # Docker compose
 docker compose config --quiet
 docker compose up --build

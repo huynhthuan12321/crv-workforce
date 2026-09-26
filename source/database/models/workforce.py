@@ -5,10 +5,13 @@ from typing import Any
 from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime,
     Enum, ForeignKey, Index, Integer, JSON, Numeric, String, Text,
     UniqueConstraint, func, text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from .base import Base
+
+JsonType = JSON().with_variant(JSONB, "postgresql")
 
 
 class TimestampMixin:
@@ -95,7 +98,7 @@ class WorkSessionOrm(Base, TimestampMixin):
     amount_raw: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus, native_enum=False), index=True)
     review_reason: Mapped[str | None] = mapped_column(String(64))
-    flags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    flags: Mapped[list[str]] = mapped_column(JsonType, default=list)
     flags_reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
     flags_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
@@ -147,8 +150,8 @@ class AuditLogOrm(Base):
     action: Mapped[str] = mapped_column(String(64), index=True)
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[int] = mapped_column(Integer)
-    old_value: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    new_value: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    old_value: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
+    new_value: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
     reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -157,7 +160,7 @@ class SyncOutboxOrm(Base):
     __tablename__ = "sync_outbox"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_type: Mapped[str] = mapped_column(String(64), index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JsonType)
     status: Mapped[OutboxStatus] = mapped_column(Enum(OutboxStatus, native_enum=False), default=OutboxStatus.pending, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -172,7 +175,7 @@ class NotificationOutboxOrm(Base):
     dedupe_key: Mapped[str] = mapped_column(String(200), unique=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     notification_type: Mapped[str] = mapped_column(String(64))
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JsonType)
     status: Mapped[OutboxStatus] = mapped_column(Enum(OutboxStatus, native_enum=False), default=OutboxStatus.pending, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)

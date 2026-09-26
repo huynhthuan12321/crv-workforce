@@ -77,7 +77,7 @@
 - **18:30**: mọi phiên còn mở được chuyển trạng thái `needs_review` (lý do `forgot_checkout`). Bot gửi danh sách cho **cả quản lý và giám đốc**.
 - Quản lý hoặc giám đốc nhập **giờ ra** cho phiên đó, kèm **lý do bắt buộc**. Giờ ra phải sau giờ vào và cùng ngày.
 - **Quét phiên tồn:** mỗi khi service bot khởi động và lúc **00:05** hằng ngày, mọi phiên `open` có `work_date` trước hôm nay được chuyển thành `needs_review` (lý do `forgot_checkout`) và báo cho quản lý, giám đốc. Mục đích: server dừng lâu hoặc scheduler lỗi cũng không để phiên cũ treo ở trạng thái `open`.
-- Mọi job thông báo đều chống gửi trùng (xem bảng `notification_log`).
+- Mọi job thông báo đều chống gửi trùng bằng `notification_outbox.dedupe_key` (unique).
 
 ### 2.8. Mục "Cần xử lý"
 
