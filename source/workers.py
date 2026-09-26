@@ -2,11 +2,12 @@ import asyncio
 import hashlib
 import hmac
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import httpx
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from sqlalchemy import select
@@ -19,17 +20,39 @@ from source.database.models import (
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import ReviewService
 from source.utils.clock import Clock, VIETNAM_TZ
+from source.utils.formatting import fmt_date_vn, fmt_money_vn, fmt_time_vn
+
+
+def app_tab_link(tab: str) -> str:
+    return f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp=tab_{tab}"
+
+
+def button_payload(text: str, tab: str) -> dict:
+    return {"text": text, "url": app_tab_link(tab)}
+
+
+def notification_markup(row: NotificationOutboxOrm) -> InlineKeyboardMarkup | None:
+    button = (row.payload or {}).get("button")
+    if not button:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=button.get("text", "Mở ứng dụng"), url=button.get("url"))
+    ]])
 
 
 def notification_text(row: NotificationOutboxOrm) -> str:
-    p = row.payload
+    p = row.payload or {}
     if row.notification_type == "batch_paid" and int(p.get("amount", 0)) == 0:
         return f"Đợt {p.get('batch_no')}: 0đ (đã được làm tròn ở đợt trước)"
+    sessions = p.get("sessions") or []
+    session_lines = "\n".join(
+        f"- {x.get('employee_name')}: {x.get('date')} từ {x.get('check_in')}" for x in sessions
+    )
     messages = {
         "checkout_reminder": f"Bạn đang trong ca từ {p.get('check_in', '')}. Vui lòng bấm Ra ca nếu đã nghỉ.",
-        "forgot_sessions": f"Có {p.get('count', 0)} phiên quên ra ca cần xử lý.",
-        "forgot_session_closed": f"Phiên ngày {p.get('work_date')} đã được đóng. Bạn có 10 phút để khai sản lượng.",
-        "batch_paid": f"Đã duyệt lương đợt {p.get('batch_no')} ngày {p.get('date')}: {p.get('amount', 0):,}đ. Tổng đã nhận hôm nay: {p.get('paid_total', 0):,}đ.".replace(",", "."),
+        "forgot_sessions": f"Có {p.get('count', 0)} phiên quên ra ca cần xử lý:\n{session_lines}".rstrip(),
+        "forgot_session_closed": f"Phiên ngày {p.get('work_date')} đã được đóng lúc {p.get('closed_time')}. Bạn có 10 phút để khai sản lượng.",
+        "batch_paid": f"Đã duyệt lương đợt {p.get('batch_no')} ngày {p.get('date')}: {fmt_money_vn(p.get('amount', 0))}. Tổng đã nhận hôm nay: {fmt_money_vn(p.get('paid_total', 0))}.",
         "consent_withdrawn": f"{p.get('employee_name')} đã rút lại đồng ý thu thập vị trí.",
     }
     return messages.get(row.notification_type, p.get("text", "Thông báo từ CRV Workforce"))
@@ -41,8 +64,9 @@ async def enqueue_if_missing(session: AsyncSession, **values) -> None:
         session.add(NotificationOutboxOrm(**values))
 
 
-async def reminder_job(factory: async_sessionmaker[AsyncSession]) -> None:
-    now = Clock().now()
+async def reminder_job(factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    clock = clock or Clock()
+    now = clock.now()
     async with factory() as session, session.begin():
         rows = (await session.scalars(select(WorkSessionOrm).where(
             WorkSessionOrm.status == SessionStatus.open, WorkSessionOrm.work_date == now.date()))).all()
@@ -51,52 +75,81 @@ async def reminder_job(factory: async_sessionmaker[AsyncSession]) -> None:
             if employee and employee.telegram_id:
                 await enqueue_if_missing(session, dedupe_key=f"reminder:{now.date()}:{row.id}",
                     chat_id=employee.telegram_id, notification_type="checkout_reminder",
-                    payload={"session_id": row.id, "check_in": row.check_in_at.strftime("%H:%M")})
+                    payload={"session_id": row.id, "check_in": fmt_time_vn(row.check_in_at),
+                             "button": button_payload("Mở ứng dụng", "attendance")})
 
 
-async def _notify_reviewers(session: AsyncSession, key: str, count: int) -> None:
+async def _session_payloads(session: AsyncSession, rows: list[WorkSessionOrm]) -> list[dict]:
+    result = []
+    for row in rows:
+        employee = await session.get(EmployeeOrm, row.employee_id)
+        result.append({
+            "session_id": row.id,
+            "employee_name": employee.full_name if employee else str(row.employee_id),
+            "date": fmt_date_vn(row.check_in_at),
+            "check_in": fmt_time_vn(row.check_in_at),
+        })
+    return result
+
+
+async def _notify_reviewers(session: AsyncSession, key: str, rows: list[WorkSessionOrm]) -> None:
     reviewers = (await session.scalars(select(EmployeeOrm).where(
         EmployeeOrm.role.in_([EmployeeRole.manager, EmployeeRole.director]),
         EmployeeOrm.is_active.is_(True), EmployeeOrm.telegram_id.is_not(None)))).all()
+    sessions = await _session_payloads(session, rows)
     for reviewer in reviewers:
         await enqueue_if_missing(session, dedupe_key=f"{key}:{reviewer.id}", chat_id=reviewer.telegram_id,
-            notification_type="forgot_sessions", payload={"count": count})
+            notification_type="forgot_sessions", payload={"count": len(rows), "sessions": sessions,
+                                                          "button": button_payload("Mở ứng dụng", "review")})
 
 
-async def escalate_job(factory: async_sessionmaker[AsyncSession]) -> None:
-    now = Clock().now()
+async def escalate_job(factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    clock = clock or Clock()
+    now = clock.now()
     async with factory() as session, session.begin():
-        rows = await ReviewService(session).escalate(now.date())
+        rows = await ReviewService(session, clock).escalate(now.date())
         if rows:
-            await _notify_reviewers(session, f"escalate:{now.date()}", len(rows))
+            await _notify_reviewers(session, f"escalate:{now.date()}", rows)
 
 
-async def sweep_job(factory: async_sessionmaker[AsyncSession]) -> None:
-    now = Clock().now()
+async def sweep_job(factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    clock = clock or Clock()
+    now = clock.now()
     async with factory() as session, session.begin():
-        rows = await ReviewService(session).sweep_stale()
+        rows = await ReviewService(session, clock).sweep_stale()
         if rows:
-            await _notify_reviewers(session, f"sweep:{now.date()}", len(rows))
+            await _notify_reviewers(session, f"sweep:{now.date()}", rows)
 
 
-async def worker_loop(bot: Bot, factory: async_sessionmaker[AsyncSession]) -> None:
+async def run_startup_jobs(factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    clock = clock or Clock()
+    now = clock.now()
+    await sweep_job(factory, clock)
+    if settings.rules.reminder_at <= now.time() < settings.rules.escalate_at:
+        await reminder_job(factory, clock)
+    elif now.time() >= settings.rules.escalate_at:
+        await escalate_job(factory, clock)
+
+
+async def worker_loop(bot: Bot, factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    clock = clock or Clock()
     while True:
         try:
-            await process_notifications(bot, factory)
-            await process_lark(factory)
+            await process_notifications(bot, factory, clock)
+            await process_lark(factory, clock)
             async with factory() as session, session.begin():
                 heartbeat = await session.get(BotHeartbeatOrm, 1)
                 if heartbeat:
-                    heartbeat.beat_at = Clock().now()
+                    heartbeat.beat_at = clock.now()
                 else:
-                    session.add(BotHeartbeatOrm(id=1, beat_at=Clock().now()))
+                    session.add(BotHeartbeatOrm(id=1, beat_at=clock.now()))
         except Exception:
             logger.exception("Background worker iteration failed")
-        await asyncio.sleep(30)
+        await asyncio.sleep(5)
 
 
-async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSession]) -> None:
-    now = Clock().now()
+async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    now = (clock or Clock()).now()
     async with factory() as session:
         rows = list((await session.scalars(select(NotificationOutboxOrm).where(
             NotificationOutboxOrm.status == OutboxStatus.pending,
@@ -104,12 +157,14 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
         ).order_by(NotificationOutboxOrm.id).limit(50))).all())
         for row in rows:
             try:
-                await bot.send_message(row.chat_id, notification_text(row))
+                await bot.send_message(row.chat_id, notification_text(row), reply_markup=notification_markup(row))
                 row.status, row.sent_at = OutboxStatus.sent, now
-            except TelegramForbiddenError as exc:
+            except TelegramForbiddenError:
                 row.status, row.last_error = OutboxStatus.failed, "bot_blocked"
             except TelegramRetryAfter as exc:
                 row.next_attempt_at = now + timedelta(seconds=exc.retry_after)
+                await session.commit()
+                return
             except Exception as exc:
                 row.attempts += 1
                 row.last_error = type(exc).__name__
@@ -117,13 +172,13 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
                     row.status = OutboxStatus.failed
                 else:
                     row.next_attempt_at = now + timedelta(seconds=min(3600, 2 ** row.attempts * 10))
-        await session.commit()
+            await session.commit()
 
 
-async def process_lark(factory: async_sessionmaker[AsyncSession]) -> None:
+async def process_lark(factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
     if not settings.lark.sync_webhook_url:
         return
-    now = Clock().now()
+    now = (clock or Clock()).now()
     async with factory() as session:
         rows = list((await session.scalars(select(SyncOutboxOrm).where(
             SyncOutboxOrm.status == OutboxStatus.pending,

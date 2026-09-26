@@ -41,7 +41,7 @@ function Reports(){const [data,setData]=useState<any>();const today=new Date().t
 function Card({children}:{children:any}){return <section className="card">{children}</section>}
 
 export default function App(){useTelegram();const [user,setUser]=useState<Employee>();const [tab,setTab]=useState("");const [error,setError]=useState("");
- useEffect(()=>{window.Telegram?.WebApp?.ready();window.Telegram?.WebApp?.expand();api.login().then(x=>{setUser(x.employee);setTab(x.employee.tabs[0])}).catch((e:ApiError)=>setError(e.message))},[]);
+ useEffect(()=>{window.Telegram?.WebApp?.ready();window.Telegram?.WebApp?.expand();api.login().then(x=>{const start=window.Telegram?.WebApp?.initDataUnsafe?.start_param||"";const requested=start.startsWith("tab_")?start.slice(4):"";setUser(x.employee);setTab(x.employee.tabs.includes(requested)?requested:x.employee.tabs[0])}).catch((e:ApiError)=>setError(e.message))},[]);
  if(error)return <main><Card><h2>Không thể mở ứng dụng</h2><p className="error">{error}</p></Card></main>;
  if(!user)return <main><Card>Đang xác thực với Telegram...</Card></main>;
  const views:any={attendance:<Attendance/>,outputs:<Outputs/>,history:<History/>,working:<Card><h2>Đang làm</h2><p>Danh sách được cập nhật từ máy chủ.</p></Card>,review:<Review/>,payroll:<Payroll/>,employees:<Employees/>,reports:<Reports/>};
