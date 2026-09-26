@@ -23,6 +23,8 @@ from source.utils.clock import Clock, VIETNAM_TZ
 
 def notification_text(row: NotificationOutboxOrm) -> str:
     p = row.payload
+    if row.notification_type == "batch_paid" and int(p.get("amount", 0)) == 0:
+        return f"Đợt {p.get('batch_no')}: 0đ (đã được làm tròn ở đợt trước)"
     messages = {
         "checkout_reminder": f"Bạn đang trong ca từ {p.get('check_in', '')}. Vui lòng bấm Ra ca nếu đã nghỉ.",
         "forgot_sessions": f"Có {p.get('count', 0)} phiên quên ra ca cần xử lý.",

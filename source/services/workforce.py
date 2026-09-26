@@ -16,7 +16,7 @@ from source.database.models import (
 )
 from source.domain.workforce_errors import fail
 from source.enums import EmployeeRole, SessionStatus
-from source.utils.clock import Clock
+from source.utils.clock import Clock, VIETNAM_TZ, to_vn
 
 
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -56,12 +56,10 @@ def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
     return bool(row.flags) and row.flags_reviewed_at is None
 
 
-def _same_tz_kind(value: datetime, reference: datetime) -> datetime:
-    if value.tzinfo is not None and reference.tzinfo is None:
-        return value.replace(tzinfo=None)
-    if value.tzinfo is None and reference.tzinfo is not None:
-        return value.replace(tzinfo=reference.tzinfo)
-    return value
+def _vn(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=VIETNAM_TZ)
+    return value.astimezone(VIETNAM_TZ)
 
 
 def _recalculate_session(row: WorkSessionOrm) -> None:
@@ -69,8 +67,7 @@ def _recalculate_session(row: WorkSessionOrm) -> None:
         row.minutes = None
         row.amount_raw = None
         return
-    check_out = _same_tz_kind(row.check_out_at, row.check_in_at)
-    row.minutes = max(0, int((check_out - row.check_in_at).total_seconds() // 60))
+    row.minutes = max(0, int((_vn(row.check_out_at) - _vn(row.check_in_at)).total_seconds() // 60))
     row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
 
 
@@ -101,7 +98,7 @@ class AttendanceService:
         return rate
 
     async def check_in(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float) -> WorkSessionOrm:
-        now = self.clock.now()
+        now = _vn(self.clock.now())
         _, consented = await current_consent(self.session, employee.id, now)
         if not consented:
             raise fail("LOCATION_CONSENT_REQUIRED")
@@ -127,7 +124,7 @@ class AttendanceService:
         return row
 
     async def check_out(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float) -> WorkSessionOrm:
-        now = self.clock.now()
+        now = _vn(self.clock.now())
         row = await self.session.scalar(select(WorkSessionOrm).where(
             WorkSessionOrm.employee_id == employee.id,
             WorkSessionOrm.status == SessionStatus.open,
@@ -139,7 +136,7 @@ class AttendanceService:
         row.check_out_lat, row.check_out_lng = Decimal(str(lat)), Decimal(str(lng))
         row.check_out_accuracy_m, row.check_out_distance_m = Decimal(str(accuracy_m)), Decimal(str(distance))
         row.flags = list(dict.fromkeys([*(row.flags or []), *_flags(distance, accuracy_m)]))
-        row.minutes = max(0, int((now - row.check_in_at).total_seconds() // 60))
+        row.minutes = max(0, int((now - _vn(row.check_in_at)).total_seconds() // 60))
         row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
         row.status, row.closed_by = SessionStatus.closed, employee.id
         self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
@@ -148,13 +145,13 @@ class AttendanceService:
         return row
 
     async def today(self, employee: EmployeeOrm) -> dict:
-        now = self.clock.now()
+        now = _vn(self.clock.now())
         rows = list((await self.session.scalars(select(WorkSessionOrm).where(
             WorkSessionOrm.employee_id == employee.id, WorkSessionOrm.work_date == now.date()))).all())
         opened = next((x for x in rows if x.status == SessionStatus.open), None)
         raw = sum((x.amount_raw or Decimal(0) for x in rows if x.status == SessionStatus.closed), Decimal(0))
         if opened:
-            running_minutes = max(0, int((now - opened.check_in_at).total_seconds() // 60))
+            running_minutes = max(0, int((now - _vn(opened.check_in_at)).total_seconds() // 60))
             raw += Decimal(running_minutes) * Decimal(opened.rate_snapshot) / Decimal(60)
         paid = await self.session.scalar(select(func.coalesce(func.sum(PayBatchOrm.amount), 0)).where(
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
@@ -175,9 +172,10 @@ class OutputService:
             raise fail("SESSION_NOT_CLOSED")
         products = list((await self.session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
         items = {x.product_id: x for x in (await self.session.scalars(select(OutputItemOrm).where(OutputItemOrm.output_log_id == output.id))).all()}
-        now = self.clock.now()
-        return {"session_id": session_id, "locked": now >= output.locked_at,
-                "seconds_remaining": max(0, int((output.locked_at - now).total_seconds())),
+        now = _vn(self.clock.now())
+        locked_at = _vn(output.locked_at)
+        return {"session_id": session_id, "locked": now >= locked_at,
+                "seconds_remaining": max(0, int((locked_at - now).total_seconds())),
                 "items": [{"code": p.code, "name": p.name, "kg_per_bag": float(p.kg_per_bag),
                            "bags": items[p.id].bags if p.id in items else 0} for p in products]}
 
@@ -186,10 +184,10 @@ class OutputService:
         if not work or work.employee_id != employee.id:
             raise fail("NOT_OWNER", 403)
         output = await self.session.scalar(select(OutputLogOrm).where(OutputLogOrm.work_session_id == session_id).with_for_update())
-        now = self.clock.now()
+        now = _vn(self.clock.now())
         if not output or work.status != SessionStatus.closed:
             raise fail("SESSION_NOT_CLOSED")
-        if _same_tz_kind(now, output.locked_at) >= output.locked_at:
+        if now >= _vn(output.locked_at):
             raise fail("OUTPUT_LOCKED")
         products = list((await self.session.scalars(select(ProductOrm))).all())
         known = {p.code for p in products}
@@ -224,7 +222,7 @@ class ReviewService:
         row = await self.session.scalar(select(WorkSessionOrm).where(WorkSessionOrm.id == session_id).with_for_update())
         if not row or row.flags_reviewed_at:
             raise fail("ALREADY_HANDLED")
-        row.flags_reviewed_by, row.flags_reviewed_at = actor.id, self.clock.now()
+        row.flags_reviewed_by, row.flags_reviewed_at = actor.id, _vn(self.clock.now())
         self.session.add(AuditLogOrm(actor_id=actor.id, action="flags_reviewed", entity_type="work_session", entity_id=row.id))
         return row
 
@@ -248,14 +246,18 @@ class ReviewService:
         return resolved
 
     async def close_forgotten(self, actor: EmployeeOrm, session_id: int, check_out: datetime, reason: str) -> WorkSessionOrm:
-        now = self.clock.now()
+        now = _vn(self.clock.now())
+        check_out_vn = to_vn(check_out)
         row = await self.session.scalar(select(WorkSessionOrm).where(WorkSessionOrm.id == session_id).with_for_update())
         if not row or row.status != SessionStatus.needs_review:
             raise fail("ALREADY_HANDLED")
-        if len(reason.strip()) < 5 or len(reason) > 200 or check_out <= row.check_in_at or check_out.date() != row.work_date:
+        if len(reason.strip()) < 5 or len(reason) > 200:
+            raise fail("REASON_REQUIRED", 422)
+        check_in_vn = _vn(row.check_in_at)
+        if check_out_vn <= check_in_vn or check_out_vn.date() != row.work_date:
             raise fail("INVALID_CHECKOUT_TIME", 422)
-        row.check_out_at, row.minutes = check_out, int((check_out - row.check_in_at).total_seconds() // 60)
-        row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
+        row.check_out_at = check_out_vn
+        _recalculate_session(row)
         row.status, row.closed_by = SessionStatus.closed, actor.id
         self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
         self.session.add(AuditLogOrm(actor_id=actor.id, action="session_close_by_manager", entity_type="work_session", entity_id=row.id, reason=reason))
@@ -276,6 +278,8 @@ class ReviewService:
         new_check_out: datetime,
         reason: str,
     ) -> WorkSessionOrm:
+        new_check_in_vn = to_vn(new_check_in)
+        new_check_out_vn = to_vn(new_check_out)
         row = await self.session.scalar(
             select(WorkSessionOrm).where(WorkSessionOrm.id == session_id).with_for_update(),
         )
@@ -286,10 +290,10 @@ class ReviewService:
         if row.status == SessionStatus.open:
             raise fail("SESSION_OPEN")
         if len(reason.strip()) < 5 or len(reason) > 200:
+            raise fail("REASON_REQUIRED", 422)
+        if new_check_out_vn <= new_check_in_vn or new_check_in_vn.date() != new_check_out_vn.date():
             raise fail("INVALID_CHECKOUT_TIME", 422)
-        if new_check_out <= new_check_in or new_check_in.date() != new_check_out.date():
-            raise fail("INVALID_CHECKOUT_TIME", 422)
-        if new_check_in.date() != row.work_date:
+        if new_check_in_vn.date() != row.work_date:
             raise fail("INVALID_CHECKOUT_TIME", 422)
 
         other_rows = (await self.session.scalars(select(WorkSessionOrm).where(
@@ -299,10 +303,9 @@ class ReviewService:
             WorkSessionOrm.status != SessionStatus.open,
         ))).all()
         for other in other_rows:
-            comparable_in = _same_tz_kind(new_check_in, other.check_in_at)
-            comparable_out = _same_tz_kind(new_check_out, other.check_in_at)
-            other_out = _same_tz_kind(other.check_out_at, other.check_in_at) if other.check_out_at else None
-            if other_out and comparable_in < other_out and comparable_out > other.check_in_at:
+            other_in = _vn(other.check_in_at)
+            other_out = _vn(other.check_out_at) if other.check_out_at else None
+            if other_out and new_check_in_vn < other_out and new_check_out_vn > other_in:
                 raise fail("SESSION_OVERLAP")
 
         old_value = {
@@ -311,9 +314,9 @@ class ReviewService:
             "minutes": row.minutes,
             "amount_raw": str(row.amount_raw) if row.amount_raw is not None else None,
         }
-        row.check_in_at = new_check_in
-        row.check_out_at = new_check_out
-        row.work_date = new_check_in.date()
+        row.check_in_at = new_check_in_vn
+        row.check_out_at = new_check_out_vn
+        row.work_date = new_check_in_vn.date()
         _recalculate_session(row)
         new_value = {
             "check_in_at": row.check_in_at.isoformat(),
@@ -341,7 +344,7 @@ class ReviewService:
         return row
 
     async def escalate(self, day: date | None = None) -> list[WorkSessionOrm]:
-        day = day or self.clock.now().date()
+        day = day or _vn(self.clock.now()).date()
         rows = list((await self.session.scalars(select(WorkSessionOrm).where(
             WorkSessionOrm.status == SessionStatus.open, WorkSessionOrm.work_date == day).with_for_update())).all())
         for row in rows:
@@ -349,7 +352,7 @@ class ReviewService:
         return rows
 
     async def sweep_stale(self) -> list[WorkSessionOrm]:
-        today = self.clock.now().date()
+        today = _vn(self.clock.now()).date()
         rows = list((await self.session.scalars(select(WorkSessionOrm).where(
             WorkSessionOrm.status == SessionStatus.open, WorkSessionOrm.work_date < today).with_for_update())).all())
         for row in rows:
@@ -405,7 +408,7 @@ class PayrollService:
             "paid_amount": paid,
             "day_total_rounded": rounded,
             "pending_amount": pending_amount,
-            "can_approve": bool(eligible and pending_amount > 0),
+            "can_approve": bool(eligible),
             "unreviewed_flag_session_ids": unreviewed,
         }
 
@@ -450,13 +453,11 @@ class PayrollService:
         rounded = ceil_money(raw)
         paid = await self._paid_amount(employee_id, day)
         amount = max(0, rounded - paid)
-        if not amount:
-            raise fail("NO_ELIGIBLE_SESSIONS")
         batch_no = int(await self.session.scalar(select(func.coalesce(func.max(PayBatchOrm.batch_no), 0)).where(
             PayBatchOrm.employee_id == employee_id, PayBatchOrm.work_date == day)) or 0) + 1
         batch = PayBatchOrm(employee_id=employee_id, work_date=day, batch_no=batch_no,
                             amount=amount, day_total_rounded_at_approval=rounded,
-                            approved_by=actor.id, approved_at=self.clock.now())
+                            approved_by=actor.id, approved_at=_vn(self.clock.now()))
         self.session.add(batch)
         await self.session.flush()
         for row in eligible:
@@ -489,7 +490,7 @@ class PayrollService:
 
 async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, name: str,
                           hourly_rate: int, effective_from: date) -> tuple[EmployeeOrm, str]:
-    today = Clock().now().date()
+    today = _vn(Clock().now()).date()
     if effective_from < today or hourly_rate <= 0:
         raise fail("INVALID_EMPLOYEE_DATA", 422)
     employee = EmployeeOrm(code=code, full_name=name, role=EmployeeRole.employee)

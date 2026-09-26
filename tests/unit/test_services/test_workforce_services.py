@@ -1,14 +1,18 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from source.api.routes import review as review_routes
 from source.database.models import (
     AuditLogOrm,
     ConsentTextOrm,
     EmployeeOrm,
     LocationConsentOrm,
+    NotificationOutboxOrm,
     OutputItemOrm,
     OutputLogOrm,
     PayBatchOrm,
@@ -26,10 +30,15 @@ from source.services.workforce import (
     ReviewService,
 )
 from source.utils.clock import FakeClock, VIETNAM_TZ
+from source.workers import notification_text
 
 
 def dt(hour: int, minute: int = 0, second: int = 0, day: int = 24) -> datetime:
     return datetime(2026, 4, day, hour, minute, second, tzinfo=VIETNAM_TZ)
+
+
+def utc_dt(hour: int, minute: int = 0, second: int = 0, day: int = 24) -> datetime:
+    return datetime(2026, 4, day, hour, minute, second, tzinfo=timezone.utc)
 
 
 async def make_employee(
@@ -151,7 +160,7 @@ async def test_attendance_checkin_cutoff_open_gps_money_rate_and_consent(session
 
 
 @pytest.mark.unit
-async def test_attendance_gps_flags_previous_review_does_not_block_and_rollback_outbox(session):
+async def test_attendance_gps_flags_previous_review_does_not_block(session):
     employee = await make_employee(session)
     await add_consent(session, employee, dt(6, 0))
     session.add(WorkSessionOrm(
@@ -171,11 +180,31 @@ async def test_attendance_gps_flags_previous_review_does_not_block_and_rollback_
     row = await AttendanceService(session, FakeClock(dt(8, 0))).check_in(employee, 10.00135, 106.0, 250)
     assert set(row.flags) == {"gps_out_of_range", "gps_low_accuracy"}
 
-    await AttendanceService(session, FakeClock(dt(11, 35))).check_out(employee, 10.0, 106.0, 10)
-    assert row.minutes == 215
+    assert row.status == SessionStatus.open
 
-    await session.rollback()
-    assert (await session.scalars(select(SyncOutboxOrm))).all() == []
+
+@pytest.mark.unit
+async def test_check_out_rollback_keeps_session_open_and_no_outbox(session_factory):
+    async with session_factory() as setup_session:
+        async with setup_session.begin():
+            employee = await make_employee(setup_session)
+            await add_consent(setup_session, employee, dt(6, 0))
+            row = await AttendanceService(setup_session, FakeClock(dt(8, 0))).check_in(employee, 10.0, 106.0, 10)
+            employee_id = employee.id
+            session_id = row.id
+
+    with pytest.raises(RuntimeError):
+        async with session_factory() as tx_session:
+            async with tx_session.begin():
+                employee = await tx_session.get(EmployeeOrm, employee_id)
+                await AttendanceService(tx_session, FakeClock(dt(11, 35))).check_out(employee, 10.0, 106.0, 10)
+                raise RuntimeError("force rollback before commit")
+
+    async with session_factory() as verify_session:
+        row = await verify_session.get(WorkSessionOrm, session_id)
+        assert row.status == SessionStatus.open
+        assert row.check_out_at is None
+        assert (await verify_session.scalars(select(SyncOutboxOrm))).all() == []
 
 
 @pytest.mark.unit
@@ -212,7 +241,7 @@ async def test_output_total_lock_boundary_and_owner(session):
 
 
 @pytest.mark.unit
-async def test_review_close_edit_resolved_escalate_and_sweep(session):
+async def test_review_close_edit_resolved_and_sweep(session):
     employee = await make_employee(session)
     manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
     flagged = await closed_session(session, employee, dt(7, 0), dt(8, 0), flags=["gps_low_accuracy"])
@@ -276,6 +305,47 @@ async def test_review_close_edit_resolved_escalate_and_sweep(session):
 
 
 @pytest.mark.unit
+async def test_escalate_1830(session):
+    employee = await make_employee(session)
+    other_employee = await make_employee(session, "NV002", "Nhân viên hôm qua")
+    today_open = WorkSessionOrm(
+        employee_id=other_employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(8, 0),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.open,
+        flags=[],
+    )
+    yesterday_open = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 23),
+        check_in_at=dt(8, 0, day=23),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.open,
+        flags=[],
+    )
+    closed = await closed_session(session, employee, dt(9, 0), dt(10, 0))
+    session.add_all([today_open, yesterday_open])
+    await session.flush()
+
+    rows = await ReviewService(session, FakeClock(dt(18, 30))).escalate()
+
+    assert rows == [today_open]
+    assert today_open.status == SessionStatus.needs_review
+    assert today_open.review_reason == "forgot_checkout"
+    assert yesterday_open.status == SessionStatus.open
+    assert closed.status == SessionStatus.closed
+
+
+@pytest.mark.unit
 async def test_review_edit_session_audit_outbox_and_overlap(session):
     employee = await make_employee(session)
     manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
@@ -291,6 +361,140 @@ async def test_review_edit_session_audit_outbox_and_overlap(session):
     assert edited.amount_raw == Decimal("45000.0000")
     assert await session.scalar(select(AuditLogOrm).where(AuditLogOrm.action == "session_edit"))
     assert await session.scalar(select(SyncOutboxOrm).where(SyncOutboxOrm.event_type == "session_updated"))
+
+
+@pytest.mark.unit
+async def test_edit_session_accepts_utc_input(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    row = await closed_session(session, employee, dt(7, 0), dt(8, 0))
+
+    edited = await ReviewService(session).edit_session(
+        manager,
+        row.id,
+        utc_dt(23, 0, day=23),
+        utc_dt(1, 0),
+        "sửa theo giờ UTC",
+    )
+
+    assert edited.work_date == date(2026, 4, 24)
+    assert edited.check_in_at == dt(6, 0)
+    assert edited.minutes == 120
+
+
+@pytest.mark.unit
+async def test_close_forgotten_accepts_utc_input(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    row = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(6, 0),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    session.add(row)
+    await session.flush()
+
+    closed = await ReviewService(session, FakeClock(dt(20, 0))).close_forgotten(
+        manager,
+        row.id,
+        utc_dt(1, 0),
+        "đóng bằng giờ UTC",
+    )
+
+    assert closed.work_date == date(2026, 4, 24)
+    assert closed.check_out_at == dt(8, 0)
+    assert closed.minutes == 120
+
+
+@pytest.mark.unit
+async def test_close_forgotten_rejects_next_day_vn(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    row = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(18, 0),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    session.add(row)
+    await session.flush()
+
+    with pytest.raises(WorkforceError) as exc:
+        await ReviewService(session).close_forgotten(manager, row.id, dt(0, 30, day=25), "qua ngày hôm sau")
+    assert_code(exc, "INVALID_CHECKOUT_TIME")
+
+
+@pytest.mark.unit
+async def test_reason_required_for_close_and_edit(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    forgotten = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(8, 0),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    session.add(forgotten)
+    editable = await closed_session(session, employee, dt(10, 0), dt(11, 0))
+    await session.flush()
+
+    with pytest.raises(WorkforceError) as exc:
+        await ReviewService(session).close_forgotten(manager, forgotten.id, dt(9, 0), "abc")
+    assert_code(exc, "REASON_REQUIRED")
+
+    with pytest.raises(WorkforceError) as exc:
+        await ReviewService(session).edit_session(manager, editable.id, dt(10, 0), dt(11, 30), "abc")
+    assert_code(exc, "REASON_REQUIRED")
+
+
+@pytest.mark.unit
+async def test_api_rejects_naive_datetime(session):
+    app = FastAPI()
+    app.include_router(review_routes.router, prefix="/review")
+    manager = EmployeeOrm(id=999, code="QL999", full_name="Quản lý", role=EmployeeRole.manager, is_active=True)
+
+    async def override_manager():
+        return manager
+
+    async def override_session():
+        yield session
+
+    app.dependency_overrides[review_routes.manager_or_director] = override_manager
+    app.dependency_overrides[review_routes.get_session] = override_session
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/review/1",
+            json={
+                "check_in_time": "2026-04-24T08:00:00",
+                "check_out_time": "2026-04-24T09:00:00+07:00",
+                "reason": "sửa test",
+            },
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
@@ -320,6 +524,11 @@ async def test_payroll_appendix_b_and_eligibility(session):
     await closed_session(session, c, dt(8, 0), dt(13, 5), 30_000)
     batch_c = await PayrollService(session).approve_one(manager, c.id, day)
     assert batch_c.amount == 153_000
+
+    c_appendix = await make_employee(session, "NV006", "Trần Văn C phụ lục", 30_000)
+    await closed_session(session, c_appendix, dt(8, 10), dt(15, 10), 30_000)
+    batch_c_appendix = await PayrollService(session).approve_one(manager, c_appendix.id, day)
+    assert batch_c_appendix.amount == 210_000
 
     flagged_employee = await make_employee(session, "NV005", "Có cờ GPS", 30_000)
     await closed_session(session, flagged_employee, dt(8, 0), dt(9, 0), 30_000, flags=["gps_out_of_range"])
@@ -362,3 +571,42 @@ async def test_payroll_open_session_does_not_block_and_listing(session):
 
     detail = await PayrollService(session).get_employee_payroll_detail(employee.id, day)
     assert detail["batches"][0]["amount"] == 30_000
+
+
+@pytest.mark.unit
+async def test_payroll_zero_amount_batch_locks_sessions(session):
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    employee = await make_employee(session, "NV001", "Nguyễn Văn A", 30_000)
+    day = date(2026, 4, 24)
+
+    await closed_session(session, employee, dt(6, 12), dt(11, 35), 30_000)
+    batch1 = await PayrollService(session).approve_one(manager, employee.id, day)
+    assert batch1.amount == 162_000
+
+    one_minute = await closed_session(session, employee, dt(13, 0), dt(13, 1), 30_000)
+    batch2 = await PayrollService(session).approve_one(manager, employee.id, day)
+
+    assert batch2.batch_no == 2
+    assert batch2.amount == 0
+    assert batch2.day_total_rounded_at_approval == 162_000
+    assert one_minute.pay_batch_id == batch2.id
+
+    with pytest.raises(WorkforceError) as exc:
+        await ReviewService(session).edit_session(manager, one_minute.id, dt(13, 0), dt(13, 2), "sửa sau khi trả")
+    assert_code(exc, "SESSION_LOCKED_PAID")
+
+    with pytest.raises(WorkforceError) as exc:
+        await PayrollService(session).approve_one(manager, employee.id, day)
+    assert_code(exc, "NO_ELIGIBLE_SESSIONS")
+
+
+@pytest.mark.unit
+async def test_batch_paid_zero_notification_text():
+    row = NotificationOutboxOrm(
+        dedupe_key="batch-paid:zero",
+        chat_id=1,
+        notification_type="batch_paid",
+        payload={"batch_no": 2, "date": "2026-04-24", "amount": 0, "paid_total": 162_000},
+    )
+
+    assert notification_text(row) == "Đợt 2: 0đ (đã được làm tròn ở đợt trước)"

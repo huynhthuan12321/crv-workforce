@@ -27,6 +27,8 @@ MESSAGES = {
     "NOT_OWNER": "Phiên làm việc không thuộc tài khoản này.",
     "ALREADY_HANDLED": "Mục này đã được xử lý.",
     "INVALID_CHECKOUT_TIME": "Giờ ra không hợp lệ.",
+    "INVALID_DATETIME": "Thời gian phải có múi giờ.",
+    "REASON_REQUIRED": "Vui lòng nhập lý do từ 5 đến 200 ký tự.",
     "SESSION_LOCKED_PAID": "Phiên đã thanh toán và bị khóa.",
     "SESSION_OPEN": "Không thể sửa phiên đang mở.",
     "SESSION_OVERLAP": "Khoảng thời gian bị chồng lấn với phiên khác.",

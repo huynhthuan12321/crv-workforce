@@ -99,6 +99,7 @@ Gồm hai loại:
 - **Phiên đủ điều kiện** vào đợt: đã đóng, không còn cờ chưa xử lý, không ở trạng thái `needs_review`, chưa thuộc đợt nào.
 - Phiên đang mở **không chặn** duyệt; nó sẽ vào đợt sau.
 - **Số tiền của đợt mới** = làm tròn LÊN 1.000đ (tổng tiền mọi phiên đã đóng trong ngày, gồm cả phiên đã trả và phiên đủ điều kiện) − tổng tiền các đợt đã trả trong ngày đó.
+- Nếu còn phiên đủ điều kiện nhưng số tiền đợt mới = 0đ (phần làm tròn của đợt trước đã bao phủ), vẫn tạo đợt 0đ để gắn và khóa các phiên đó. Bot nhắn nhân viên: 'Đợt N: 0đ (đã được làm tròn ở đợt trước)'.
 - Duyệt = **trả ngay**. Đợt được tạo ở trạng thái `paid`. Đợt và các phiên bên trong bị **khóa vĩnh viễn**, không ai sửa được.
 - Có thể duyệt nhiều nhân viên cùng lúc; mỗi nhân viên tạo một đợt riêng.
 - Nếu không còn phiên nào đủ điều kiện → báo "Không có dữ liệu để duyệt".
