@@ -15,7 +15,7 @@ export function Button({
   busy?: boolean;
 }) {
   return (
-    <button {...props} disabled={props.disabled || busy} className={`crv-button crv-button--${tone} ${className}`}>
+    <button {...props} aria-disabled={props.disabled || busy} disabled={props.disabled || busy} className={`crv-button crv-button--${tone} ${className}`}>
       {busy ? "Đang xử lý..." : children}
     </button>
   );

@@ -43,7 +43,6 @@ export function ConsentGate({onAccepted, onPrivacy}: {onAccepted: () => void; on
   return (
     <Card className="consent-card">
       <SectionTitle eyebrow={`Phiên bản ${consent.version}`} title="Đồng ý thu thập vị trí" />
-      <p className="muted">CRV chỉ thu vị trí tại thời điểm bạn bấm Vào ca/Ra ca, không theo dõi liên tục.</p>
       <div className="legal-box">{consent.content}</div>
       {error && <p className="form-error">{error}</p>}
       <Button busy={busy} onClick={accept}>Tôi đồng ý</Button>

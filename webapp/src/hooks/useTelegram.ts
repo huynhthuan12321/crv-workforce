@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import {applyMockTheme, applyTelegramTheme, mockThemeFromUrl} from "../lib/theme";
 
 export const useTelegram = () => {
   const [isReady, setIsReady] = useState(false);
@@ -13,25 +14,20 @@ export const useTelegram = () => {
   }, [tg]);
 
   useEffect(() => {
-    if (!tg?.themeParams) return;
-    const root = document.documentElement;
-    const params = tg.themeParams;
-    const map: Record<string, string> = {
-      bg_color: "--tg-theme-bg-color",
-      text_color: "--tg-theme-text-color",
-      hint_color: "--tg-theme-hint-color",
-      link_color: "--tg-theme-link-color",
-      button_color: "--tg-theme-button-color",
-      button_text_color: "--tg-theme-button-text-color",
-      secondary_bg_color: "--tg-theme-secondary-bg-color"
-    };
-
-    Object.entries(map).forEach(([key, cssVar]) => {
-      const value = params[key as keyof typeof params];
-      if (value) {
-        root.style.setProperty(cssVar, value);
-      }
-    });
+    if (import.meta.env.DEV && import.meta.env.VITE_MOCK === "1") {
+      const apply = () => applyMockTheme(mockThemeFromUrl());
+      apply();
+      window.addEventListener("crv-mock-theme", apply);
+      return () => window.removeEventListener("crv-mock-theme", apply);
+    }
+    if (!tg) {
+      applyMockTheme(mockThemeFromUrl());
+      return;
+    }
+    const apply = () => applyTelegramTheme(tg.colorScheme, tg.themeParams);
+    apply();
+    tg.onEvent?.("themeChanged", apply);
+    return () => tg.offEvent?.("themeChanged", apply);
   }, [tg]);
 
   const user = tg?.initDataUnsafe?.user;
