@@ -1,0 +1,19 @@
+.profile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: var(--spacing-lg);
+}
+
+.profile-header__name {
+  font-size: 24px;
+  font-weight: 600;
+  margin-top: var(--spacing-md);
+}
+
+.profile-header__username {
+  color: var(--tg-theme-hint-color);
+  font-size: 16px;
+  margin-top: var(--spacing-xs);
+}

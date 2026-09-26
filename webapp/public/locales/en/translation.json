@@ -1,0 +1,30 @@
+{
+  "profile": {
+    "title": "Profile",
+    "bio": {
+      "title": "About",
+      "placeholder": "Tell about yourself...",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "charCount": "{{current}}/{{max}} characters"
+    },
+    "stats": {
+      "userId": "ID in system",
+      "telegramId": "Telegram ID",
+      "language": "Language",
+      "registeredAt": "Registered"
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "retry": "Retry"
+  },
+  "errors": {
+    "unauthorized": "Authorization error",
+    "tooManyRequests": "Too many requests. Please wait.",
+    "apiError": "Server error. Try again later.",
+    "networkError": "Network error. Check your connection."
+  }
+}

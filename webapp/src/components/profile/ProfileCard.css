@@ -1,0 +1,10 @@
+.profile-card {
+  background: var(--tg-theme-secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-lg);
+}
+
+.profile-card--empty {
+  text-align: center;
+  color: var(--tg-theme-hint-color);
+}

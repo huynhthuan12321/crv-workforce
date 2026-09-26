@@ -1,0 +1,3 @@
+API_PREFIX = "/api"
+API_DOCS_URL = f"{API_PREFIX}/docs"
+API_REDOC_URL = f"{API_PREFIX}/redoc"

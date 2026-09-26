@@ -1,0 +1,30 @@
+{
+  "profile": {
+    "title": "Профиль",
+    "bio": {
+      "title": "О себе",
+      "placeholder": "Расскажите о себе...",
+      "edit": "Изменить",
+      "save": "Сохранить",
+      "cancel": "Отмена",
+      "charCount": "{{current}}/{{max}} символов"
+    },
+    "stats": {
+      "userId": "ID в системе",
+      "telegramId": "Telegram ID",
+      "language": "Язык",
+      "registeredAt": "Дата регистрации"
+    }
+  },
+  "common": {
+    "loading": "Загрузка...",
+    "error": "Произошла ошибка",
+    "retry": "Повторить"
+  },
+  "errors": {
+    "unauthorized": "Ошибка авторизации",
+    "tooManyRequests": "Слишком много запросов. Подождите.",
+    "apiError": "Ошибка сервера. Попробуйте позже.",
+    "networkError": "Ошибка сети. Проверьте подключение."
+  }
+}

@@ -1,0 +1,12 @@
+.app {
+  background-color: var(--tg-theme-bg-color);
+  color: var(--tg-theme-text-color);
+  min-height: 100vh;
+}
+
+.app--dark {
+  --tg-theme-bg-color: #1c1c1d;
+  --tg-theme-text-color: #ffffff;
+  --tg-theme-hint-color: #7d7d82;
+  --tg-theme-secondary-bg-color: #2c2c2e;
+}

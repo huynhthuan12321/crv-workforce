@@ -1,0 +1,11 @@
+.profile-page {
+  padding: var(--spacing-md);
+  min-height: 100vh;
+}
+
+.profile-page--loading,
+.profile-page--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
