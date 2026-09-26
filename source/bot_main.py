@@ -4,6 +4,7 @@ from aiogram.types import MenuButtonWebApp, WebAppInfo
 from dishka.integrations.aiogram import setup_dishka
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from source.factory import create_bot, create_container, create_dispatcher
 from source.utils import set_default_commands, setup_logger
@@ -15,12 +16,20 @@ from source.workers import build_scheduler, run_startup_jobs, worker_loop
 BOT_ADVISORY_LOCK_ID = 910202601
 
 
-async def run() -> None:
-    lock_conn = await engine.connect()
-    locked = await lock_conn.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": BOT_ADVISORY_LOCK_ID})
+async def acquire_bot_lock(db_engine: AsyncEngine) -> AsyncConnection | None:
+    conn = await db_engine.connect()
+    conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+    locked = await conn.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": BOT_ADVISORY_LOCK_ID})
     if not locked:
+        await conn.close()
+        return None
+    return conn
+
+
+async def run() -> None:
+    lock_conn = await acquire_bot_lock(engine)
+    if lock_conn is None:
         logger.error("Another bot instance is already running; advisory lock is held")
-        await lock_conn.close()
         return
     container = create_container()
     bot = create_bot()
@@ -32,7 +41,7 @@ async def run() -> None:
     scheduler = build_scheduler(session_factory)
     scheduler.start()
     await run_startup_jobs(session_factory)
-    worker_task = asyncio.create_task(worker_loop(bot, session_factory))
+    worker_task = asyncio.create_task(worker_loop(bot, session_factory, lock_conn=lock_conn))
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("CRV bot polling started")

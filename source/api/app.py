@@ -14,6 +14,7 @@ from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
 from source.constants import API_REDOC_URL
 from source.domain.workforce_errors import WorkforceError
+from source.services.rate_limit import attendance_rate_limiter
 
 
 async def workforce_error_handler(_, exc: WorkforceError):
@@ -45,6 +46,14 @@ def setup_api(app: FastAPI) -> None:
     app.include_router(payroll.router, prefix=f"{API_PREFIX}/payroll", tags=["Payroll"])
     app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
     app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
+
+    @app.on_event("startup")
+    async def startup_rate_limiter() -> None:
+        await attendance_rate_limiter.start()
+
+    @app.on_event("shutdown")
+    async def shutdown_rate_limiter() -> None:
+        await attendance_rate_limiter.close()
 
 
 def create_app(container) -> FastAPI:

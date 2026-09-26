@@ -5,10 +5,12 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from source.bot_main import acquire_bot_lock
 from source.database.models import Base, EmployeeOrm, PayBatchOrm, WorkSessionOrm
 from source.domain.workforce_errors import WorkforceError
 from source.enums import EmployeeRole, SessionStatus
@@ -132,3 +134,19 @@ async def test_concurrent_close_forgotten(pg_factory):
     results = await asyncio.gather(close_once(), close_once())
     assert sum(isinstance(item, WorkSessionOrm) for item in results) == 1
     assert results.count("ALREADY_HANDLED") == 1
+
+
+async def test_bot_advisory_lock_autocommit_idle(pg_factory):
+    engine = pg_factory.kw["bind"]
+    lock1 = await acquire_bot_lock(engine)
+    assert lock1 is not None
+    try:
+        pid = await lock1.scalar(text("SELECT pg_backend_pid()"))
+        lock2 = await acquire_bot_lock(engine)
+        assert lock2 is None
+        async with pg_factory() as session:
+            state = await session.scalar(text("SELECT state FROM pg_stat_activity WHERE pid = :pid"), {"pid": pid})
+            assert state == "idle"
+    finally:
+        await lock1.scalar(text("SELECT pg_advisory_unlock(910202601)"))
+        await lock1.close()

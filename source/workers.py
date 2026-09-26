@@ -2,7 +2,9 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 from datetime import timedelta
+from time import monotonic
 
 import httpx
 from aiogram import Bot
@@ -11,7 +13,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from source.config import settings
 from source.database.models import (
@@ -21,6 +24,8 @@ from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import ReviewService
 from source.utils.clock import Clock, VIETNAM_TZ
 from source.utils.formatting import fmt_date_vn, fmt_money_vn, fmt_time_vn
+
+_notifications_paused_until = None
 
 
 def app_tab_link(tab: str) -> str:
@@ -131,10 +136,30 @@ async def run_startup_jobs(factory: async_sessionmaker[AsyncSession], clock: Clo
         await escalate_job(factory, clock)
 
 
-async def worker_loop(bot: Bot, factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+async def _check_lock_connection(lock_conn: AsyncConnection | None) -> None:
+    if lock_conn is None:
+        return
+    await lock_conn.scalar(text("SELECT 1"))
+
+
+async def worker_loop(
+    bot: Bot,
+    factory: async_sessionmaker[AsyncSession],
+    clock: Clock | None = None,
+    lock_conn: AsyncConnection | None = None,
+) -> None:
     clock = clock or Clock()
+    last_lock_check = 0.0
     while True:
         try:
+            now_monotonic = monotonic()
+            if now_monotonic - last_lock_check >= 60:
+                last_lock_check = now_monotonic
+                try:
+                    await _check_lock_connection(lock_conn)
+                except Exception:
+                    logger.error("Bot advisory lock connection is lost; stopping process for restart")
+                    os._exit(1)
             await process_notifications(bot, factory, clock)
             await process_lark(factory, clock)
             async with factory() as session, session.begin():
@@ -149,7 +174,12 @@ async def worker_loop(bot: Bot, factory: async_sessionmaker[AsyncSession], clock
 
 
 async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSession], clock: Clock | None = None) -> None:
+    global _notifications_paused_until
     now = (clock or Clock()).now()
+    if _notifications_paused_until is not None and now < _notifications_paused_until:
+        return
+    if _notifications_paused_until is not None and now >= _notifications_paused_until:
+        _notifications_paused_until = None
     async with factory() as session:
         rows = list((await session.scalars(select(NotificationOutboxOrm).where(
             NotificationOutboxOrm.status == OutboxStatus.pending,
@@ -162,7 +192,8 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
             except TelegramForbiddenError:
                 row.status, row.last_error = OutboxStatus.failed, "bot_blocked"
             except TelegramRetryAfter as exc:
-                row.next_attempt_at = now + timedelta(seconds=exc.retry_after)
+                _notifications_paused_until = now + timedelta(seconds=exc.retry_after)
+                row.next_attempt_at = _notifications_paused_until
                 await session.commit()
                 return
             except Exception as exc:

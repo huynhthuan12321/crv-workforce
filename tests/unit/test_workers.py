@@ -9,6 +9,7 @@ from source.database.models import EmployeeOrm, NotificationOutboxOrm, PayBatchO
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import PayrollService, ReviewService
 from source.utils.clock import FakeClock, VIETNAM_TZ
+import source.workers as workers_module
 from source.workers import (
     escalate_job,
     notification_text,
@@ -156,6 +157,7 @@ async def test_close_forgotten_and_payroll_notification_texts(session_factory):
 
 
 async def test_process_notifications_403_failed_and_429_stops_batch(session_factory):
+    workers_module._notifications_paused_until = None
     async with session_factory() as session, session.begin():
         session.add(NotificationOutboxOrm(dedupe_key="a", chat_id=1, notification_type="checkout_reminder",
                                           payload={"check_in": "08:00"}, status=OutboxStatus.pending))
@@ -170,9 +172,18 @@ async def test_process_notifications_403_failed_and_429_stops_batch(session_fact
                                           payload={"check_in": "08:00"}, status=OutboxStatus.pending))
         session.add(NotificationOutboxOrm(dedupe_key="c", chat_id=3, notification_type="checkout_reminder",
                                           payload={"check_in": "08:00"}, status=OutboxStatus.pending))
-    await process_notifications(FakeBot(TelegramRetryAfter(method=None, message="retry", retry_after=7)), session_factory, FakeClock(NOW))
+    await process_notifications(FakeBot(TelegramRetryAfter(method=None, message="retry", retry_after=30)), session_factory, FakeClock(NOW))
     async with session_factory() as session:
         row_b = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.dedupe_key == "b"))
         row_c = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.dedupe_key == "c"))
-        assert row_b.next_attempt_at == (NOW + timedelta(seconds=7)).replace(tzinfo=None)
+        assert row_b.next_attempt_at == (NOW + timedelta(seconds=30)).replace(tzinfo=None)
         assert row_c.next_attempt_at is None
+
+    paused_bot = FakeBot()
+    await process_notifications(paused_bot, session_factory, FakeClock(NOW + timedelta(seconds=5)))
+    assert paused_bot.sent == []
+
+    resumed_bot = FakeBot()
+    await process_notifications(resumed_bot, session_factory, FakeClock(NOW + timedelta(seconds=31)))
+    assert len(resumed_bot.sent) >= 1
+    workers_module._notifications_paused_until = None

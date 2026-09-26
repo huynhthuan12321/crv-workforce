@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -12,6 +13,7 @@ from sqlalchemy.pool import NullPool
 from source.api.app import setup_api
 from source.api.dependencies import get_session
 from source.api.utils.session_token import create_session_token
+from source.config import settings
 from source.database.models import (
     Base,
     ConsentTextOrm,
@@ -26,6 +28,7 @@ from source.database.models import (
     NotificationOutboxOrm,
 )
 from source.enums import EmployeeRole, SessionStatus
+from source.services.rate_limit import attendance_rate_limiter
 from source.services import workforce as workforce_module
 from source.utils.clock import FakeClock, VIETNAM_TZ
 from source.workers import reminder_job, notification_text
@@ -34,6 +37,30 @@ from source.workers import reminder_job, notification_text
 pytestmark = pytest.mark.postgres
 
 NOW = datetime(2026, 4, 24, 8, 0, tzinfo=VIETNAM_TZ)
+
+
+async def clear_rate_limit_state() -> None:
+    attendance_rate_limiter.reset_memory()
+    if os.getenv("CRV_TEST_CLEAR_REDIS") != "1":
+        return
+    redis = Redis(
+        host=settings.redis.host,
+        port=settings.redis.port,
+        username=settings.redis.user,
+        password=settings.redis.password.get_secret_value(),
+        db=settings.redis.db,
+        decode_responses=True,
+        socket_connect_timeout=0.2,
+        socket_timeout=0.2,
+    )
+    try:
+        keys = [key async for key in redis.scan_iter(match="rl:attendance:*")]
+        if keys:
+            await redis.delete(*keys)
+    except Exception:
+        pass
+    finally:
+        await redis.aclose()
 
 
 @pytest.fixture()
@@ -54,6 +81,7 @@ async def pg_factory():
 
 @pytest.fixture()
 async def api_client(pg_factory, monkeypatch):
+    await clear_rate_limit_state()
     monkeypatch.setattr(workforce_module, "Clock", lambda: FakeClock(NOW))
 
     from source.api.routes import consent as consent_route
@@ -70,7 +98,9 @@ async def api_client(pg_factory, monkeypatch):
 
     app.dependency_overrides[get_session] = override_get_session
     with TestClient(app) as client:
+        await clear_rate_limit_state()
         yield client
+    await clear_rate_limit_state()
 
 
 async def seed_actor(session, code: str, role: EmployeeRole, telegram_id: int | None = None) -> EmployeeOrm:
@@ -260,6 +290,7 @@ async def test_http_business_error_rolls_back(api_client, pg_factory):
     async with pg_factory() as session:
         before = await session.scalar(select(func.count()).select_from(WorkSessionOrm))
 
+    await clear_rate_limit_state()
     response = api_client.post("/api/attendance/check-in", json=loc, headers=headers)
     assert response.status_code == 409
     assert response.json()["code"] == "SESSION_ALREADY_OPEN"
