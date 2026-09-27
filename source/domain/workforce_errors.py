@@ -19,7 +19,7 @@ MESSAGES = {
     "INVITE_EXPIRED": "Link mời đã hết hạn.",
     "TELEGRAM_ALREADY_LINKED": "Tài khoản Telegram đã được liên kết.",
     "LOCATION_CONSENT_REQUIRED": "Bạn cần đồng ý thu thập vị trí trước khi vào ca.",
-    "CHECKIN_AFTER_CUTOFF": "Không thể vào ca từ 18:00.",
+    "CHECKIN_AFTER_CUTOFF": "Đã hết giờ vào ca hôm nay.",
     "SESSION_ALREADY_OPEN": "Bạn đang có một phiên làm việc.",
     "NO_OPEN_SESSION": "Không có phiên làm việc đang mở.",
     "NO_RATE": "Chưa có đơn giá hiệu lực.",
