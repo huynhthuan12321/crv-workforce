@@ -65,6 +65,38 @@ def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
     return bool(row.flags) and row.flags_reviewed_at is None
 
 
+def _flag_source(row: WorkSessionOrm) -> str | None:
+    if not row.flags:
+        return None
+    in_flagged = False
+    out_flagged = False
+    if "gps_out_of_range" in (row.flags or []):
+        in_flagged = in_flagged or (
+            row.check_in_distance_m is not None
+            and Decimal(row.check_in_distance_m) > Decimal(str(settings.workshop.radius_m))
+        )
+        out_flagged = out_flagged or (
+            row.check_out_distance_m is not None
+            and Decimal(row.check_out_distance_m) > Decimal(str(settings.workshop.radius_m))
+        )
+    if "gps_low_accuracy" in (row.flags or []):
+        in_flagged = in_flagged or (
+            row.check_in_accuracy_m is not None
+            and Decimal(row.check_in_accuracy_m) > Decimal(str(settings.rules.gps_max_accuracy_m))
+        )
+        out_flagged = out_flagged or (
+            row.check_out_accuracy_m is not None
+            and Decimal(row.check_out_accuracy_m) > Decimal(str(settings.rules.gps_max_accuracy_m))
+        )
+    if in_flagged and out_flagged:
+        return "both"
+    if out_flagged:
+        return "check_out"
+    if in_flagged:
+        return "check_in"
+    return "check_in"
+
+
 def _review_type(row: WorkSessionOrm) -> str | None:
     if row.status == SessionStatus.needs_review or row.review_reason == "forgot_checkout":
         return "forgot"
@@ -593,6 +625,15 @@ class PayrollService:
             WorkSessionOrm.pay_batch_id.is_not(None)))
         return Decimal(paid_sessions_raw or 0)
 
+    async def _blocked_amount(self, employee_id: int, day: date, paid: int, pending_eligible: int) -> int:
+        all_closed_raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(
+            WorkSessionOrm.employee_id == employee_id,
+            WorkSessionOrm.work_date == day,
+            WorkSessionOrm.status == SessionStatus.closed,
+        )) or 0)
+        all_closed_rounded = ceil_money(all_closed_raw) if all_closed_raw else 0
+        return max(0, all_closed_rounded - paid - pending_eligible)
+
     async def _payroll_summary(self, employee: EmployeeOrm, day: date) -> dict:
         eligible = await self.eligible_sessions(employee.id, day)
         all_sessions = list((await self.session.scalars(select(WorkSessionOrm).where(
@@ -602,16 +643,17 @@ class PayrollService:
         raw += sum((row.amount_raw or Decimal(0) for row in eligible), Decimal(0))
         rounded = ceil_money(raw) if raw else 0
         pending_amount = max(0, rounded - paid)
-        unreviewed = [row.id for row in all_sessions if _has_unreviewed_flags(row)]
+        unreviewed = [row.id for row in all_sessions if row.status == SessionStatus.closed and _has_unreviewed_flags(row)]
         needs_review = [row.id for row in all_sessions if row.status == SessionStatus.needs_review]
         has_open = any(row.status == SessionStatus.open for row in all_sessions)
-        pending_reason = None
+        pending_reasons = []
+        if unreviewed:
+            pending_reasons.append("unreviewed_gps")
+        if needs_review:
+            pending_reasons.append("forgot_checkout")
         if has_open:
-            pending_reason = "open_session"
-        elif unreviewed:
-            pending_reason = "unreviewed_gps"
-        elif needs_review:
-            pending_reason = "forgot_checkout"
+            pending_reasons.append("open_session")
+        blocked_amount = await self._blocked_amount(employee.id, day, paid, pending_amount)
         return {
             "employee_id": employee.id,
             "code": employee.code,
@@ -624,11 +666,14 @@ class PayrollService:
             "paid_amount": paid,
             "day_total_rounded": rounded,
             "pending_amount": pending_amount,
+            "blocked_amount": blocked_amount,
             "can_approve": bool(eligible),
             "unreviewed_flag_session_ids": unreviewed,
             "has_open_session": has_open,
+            "has_sessions": bool(all_sessions),
             "needs_review_session_ids": needs_review,
-            "pending_reason": pending_reason,
+            "pending_reason": pending_reasons[0] if pending_reasons else None,
+            "pending_reasons": pending_reasons,
         }
 
     async def list_payroll(self, day: date) -> list[dict]:
@@ -736,6 +781,13 @@ class HistoryService:
          .order_by(ProductOrm.sort_order))).all()
         return [{"code": x[0], "name": x[1], "bags": int(x[2]), "kg": float(x[3])} for x in rows]
 
+    async def _output_state(self, session_id: int) -> dict:
+        output = await self.session.scalar(select(OutputLogOrm).where(OutputLogOrm.work_session_id == session_id))
+        if not output:
+            return {"output_locked": True, "output_locked_at": None}
+        locked_at = _vn(output.locked_at)
+        return {"output_locked": _vn(self.clock.now()) >= locked_at, "output_locked_at": iso_vn(output.locked_at)}
+
     async def history(self, employee: EmployeeOrm, start: date | None, end: date | None) -> dict:
         today = _vn(self.clock.now()).date()
         end = end or today
@@ -755,7 +807,7 @@ class HistoryService:
                 "pay_batch_id": row.pay_batch_id,
                 "pending_reason": self._pending_reason(row),
                 "output": await self._output_items(row.id),
-            }
+            } | await self._output_state(row.id)
             if row.pay_batch_id in by_batch:
                 by_batch[row.pay_batch_id].append(data)
             elif row.pay_batch_id is None:
@@ -777,12 +829,17 @@ class HistoryService:
                                 if row.work_date == day and row.pay_batch_id is None
                                 and row.status == SessionStatus.closed and not _has_unreviewed_flags(row)), Decimal(0))
             pending = 0
+            blocked = 0
             if eligible_raw:
                 paid_raw = await PayrollService(self.session)._paid_sessions_raw(employee.id, day)
                 pending = max(0, ceil_money(paid_raw + eligible_raw) - paid)
+            blocked = await PayrollService(self.session)._blocked_amount(employee.id, day, paid, pending)
             days.append({
                 "date": day,
-                "total_amount": paid + pending,
+                "total_amount": paid + pending + blocked,
+                "paid_amount": paid,
+                "pending_amount": pending,
+                "blocked_amount": blocked,
                 "batches": day_batches,
                 "unpaid_sessions": unpaid_by_day.get(day, []),
             })
@@ -835,13 +892,7 @@ class ReportService:
                 pending_eligible = 0
                 if employee:
                     pending_eligible = int((await payroll._payroll_summary(employee, current))["pending_amount"])
-                all_closed_raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(
-                    WorkSessionOrm.employee_id == emp_id,
-                    WorkSessionOrm.work_date == current,
-                    WorkSessionOrm.status == SessionStatus.closed,
-                )) or 0)
-                all_closed_rounded = ceil_money(all_closed_raw) if all_closed_raw else 0
-                pending_blocked = max(0, all_closed_rounded - paid - pending_eligible)
+                pending_blocked = await payroll._blocked_amount(emp_id, current, paid, pending_eligible)
                 needs_review_count = int(await self.session.scalar(select(func.count()).select_from(WorkSessionOrm).where(
                     WorkSessionOrm.employee_id == emp_id,
                     WorkSessionOrm.work_date == current,
@@ -1027,6 +1078,7 @@ def session_dict(row: WorkSessionOrm | None) -> dict | None:
             "minutes": row.minutes, "rate_snapshot": row.rate_snapshot,
             "amount_raw": float(row.amount_raw) if row.amount_raw is not None else None,
             "status": row.status.value, "review_reason": row.review_reason, "flags": row.flags or [],
+            "flag_source": _flag_source(row),
             "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
             "check_in_distance_m": float(row.check_in_distance_m),
             "check_out_accuracy_m": float(row.check_out_accuracy_m) if row.check_out_accuracy_m is not None else None,

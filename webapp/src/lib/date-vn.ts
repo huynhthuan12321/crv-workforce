@@ -17,12 +17,17 @@ export function todayVN(now: Date = new Date()): string {
 }
 
 export function fmtDate(value: Date | string | number, options: Intl.DateTimeFormatOptions = {}): string {
-  return new Intl.DateTimeFormat("vi-VN", {
+  const formatterOptions: Intl.DateTimeFormatOptions = {
     timeZone: TZ,
     day: "2-digit",
     month: "2-digit",
     ...options,
-  }).format(new Date(value));
+  };
+  const hasCustomParts = Object.keys(options).some((key) => !["timeZone", "day", "month"].includes(key));
+  if (hasCustomParts) return new Intl.DateTimeFormat("vi-VN", formatterOptions).format(new Date(value));
+  const parts = new Intl.DateTimeFormat("vi-VN", formatterOptions).formatToParts(new Date(value));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")}`;
 }
 
 export function fmtDateLong(value: Date | string | number): string {

@@ -1047,7 +1047,7 @@ input:disabled {
   width: min(680px, 100%);
   margin: 0 auto;
   gap: 6px;
-  overflow-x: auto;
+  overflow: hidden;
   border-top: 1px solid var(--crv-border);
   background: var(--crv-card);
   box-shadow: 0 -10px 30px var(--crv-shadow);
@@ -1091,19 +1091,46 @@ input:disabled {
 
 .bottom-tabs button {
   display: grid;
-  min-width: 92px;
+  flex: 1 1 0;
+  min-width: 0;
   place-items: center;
   gap: 3px;
   border-radius: 16px;
   background: transparent;
   color: var(--crv-muted);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 800;
-  padding: 9px 8px;
+  padding: 8px 4px;
+  line-height: 1.08;
+  text-align: center;
 }
 
 .bottom-tabs button span {
   font-size: 16px;
+}
+
+.bottom-tabs button em {
+  display: block;
+  overflow: visible;
+  max-width: 100%;
+  font-style: normal;
+  line-height: 1.08;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.inline-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inline-actions .crv-button {
+  min-height: 34px;
+  padding: 8px 12px;
 }
 
 .bottom-tabs button.active {

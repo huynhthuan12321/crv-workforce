@@ -2,6 +2,7 @@ import {useCallback, useEffect, useState} from "react";
 import {api} from "../../../api/client";
 import {Card, Chip, ScreenState, SectionTitle} from "../../../components/ui";
 import {fmtDuration, fmtTime} from "../../../lib/date-vn";
+import {gpsLabel} from "../../../lib/gps-label";
 import type {WorkingNowItem} from "../../../types/api";
 import {errorText} from "../shared";
 
@@ -43,7 +44,7 @@ export function WorkingScreen() {
                 <small>{row.code} · Vào ca {fmtTime(row.check_in_at)}</small>
               </div>
               <Chip tone={row.is_outside ? "warning" : "success"}>
-                {row.is_outside ? `Ngoài xưởng (${Math.round(row.check_in_distance_m ?? 0)} m)` : "Trong xưởng"}
+                {gpsLabel(row)}
               </Chip>
             </div>
             <div className="manager-time">{fmtDuration(row.minutes_worked)}</div>

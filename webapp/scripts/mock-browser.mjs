@@ -33,6 +33,7 @@ export const managerScenarios = [
   ["manager_review_resolved", "review", "04_da_xu_ly"],
   ["manager_already_handled", "review", "05_already_handled"],
   ["manager_payroll", "payroll", "06_duyet_luong"],
+  ["manager_payroll_real_phone", "payroll", "06b_duyet_luong_du_lieu_that"],
   ["manager_payroll_a_detail", "payroll", "07_chi_tiet_luong_a"],
   ["manager_session_edit", "payroll", "08_sua_phien"],
   ["manager_payroll_confirm", "payroll", "09_hop_xac_nhan"],

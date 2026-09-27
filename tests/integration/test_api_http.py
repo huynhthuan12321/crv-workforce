@@ -477,7 +477,8 @@ async def test_gd7c_manager_api_fields_and_filters(api_client, pg_factory):
     assert payroll["hourly_rate"] == 30000
     assert payroll["has_open_session"] is True
     assert payroll["needs_review_session_ids"] == [forgotten_id]
-    assert payroll["pending_reason"] == "open_session"
+    assert payroll["pending_reason"] == "forgot_checkout"
+    assert payroll["pending_reasons"] == ["forgot_checkout", "open_session"]
 
     response = api_client.get(f"/api/payroll/{employee_id}?date={NOW.date()}", headers=headers)
     assert response.status_code == 200, response.text

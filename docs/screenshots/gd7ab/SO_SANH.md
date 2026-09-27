@@ -2,7 +2,7 @@
 
 Ảnh thiết kế gốc: [docs/design/crv_ui_v1.png](../../design/crv_ui_v1.png)
 
-Các ảnh dưới đây được chụp bằng mock DEV (`VITE_MOCK=1`), mobile viewport 390px bằng Puppeteer, gồm cả sáng và tối. Đã kiểm tra không tràn ngang ở 360px và 390px bằng `npm run test:overflow`.
+Các ảnh dưới đây được chụp bằng mock DEV (`VITE_MOCK=1`), mobile viewport 390px bằng Puppeteer, gồm cả sáng và tối. Đã kiểm tra không tràn ngang ở 360px, 390px và 430px; script cũng kiểm chữ trong tab bar/chip không bị cắt bằng `npm run test:overflow`.
 
 | Màn trong thiết kế / DESIGN_NOTES | Ảnh sáng | Ảnh tối | Khác biệt còn lại |
 |---|---|---|---|
@@ -13,7 +13,7 @@ Các ảnh dưới đây được chụp bằng mock DEV (`VITE_MOCK=1`), mobile
 | Sau 18:00 – khóa vào ca | [light](05_sau_18h_light.png) | [dark](05_sau_18h_dark.png) | Nút VÀO CA disabled/aria-disabled và hiển thị xám; backend vẫn là nơi chặn thật. |
 | Sản lượng – còn 10 phút | [light](06_san_luong_con_10_phut_light.png) | [dark](06_san_luong_con_10_phut_dark.png) | Stepper + nhập trực tiếp; số kg dùng mẫu đúng DESIGN_NOTES: tổng 14,0 kg. |
 | Sản lượng – đã khóa | [light](07_san_luong_da_khoa_light.png) | [dark](07_san_luong_da_khoa_dark.png) | Form tự khóa khi countdown về 00:00. |
-| Lịch sử – nhiều đợt | [light](08_lich_su_nhieu_dot_light.png) | [dark](08_lich_su_nhieu_dot_dark.png) | Dùng “Chờ duyệt” không đánh số đợt; mỗi phiên chỉ hiện giờ, thời lượng, GPS, sản lượng. |
+| Lịch sử – nhiều đợt | [light](08_lich_su_nhieu_dot_light.png) | [dark](08_lich_su_nhieu_dot_dark.png) | Dùng “Chờ duyệt” không đánh số đợt; thẻ ngày tách Đã trả / Chờ duyệt / Chờ quản lý xem lại; mỗi phiên chỉ hiện giờ, thời lượng, GPS, sản lượng. |
 | Đồng ý thu thập vị trí | [light](09_chua_dong_y_vi_tri_light.png) | [dark](09_chua_dong_y_vi_tri_dark.png) | Tự thiết kế cùng phong cách vì ảnh gốc thiếu màn này; chỉ giữ nội dung từ API trong khung. |
 | Chưa được cấp quyền | [light](10_chua_duoc_cap_quyen_light.png) | [dark](10_chua_duoc_cap_quyen_dark.png) | Tự thiết kế cùng phong cách vì ảnh gốc thiếu màn này. |
 | Tài khoản bị khóa | [light](11_bi_khoa_light.png) | [dark](11_bi_khoa_dark.png) | Tự thiết kế cùng phong cách vì ảnh gốc thiếu màn này. |

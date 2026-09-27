@@ -38,6 +38,7 @@ class WorkSessionOut(BaseModel):
     status: str
     review_reason: str | None = None
     flags: list[str]
+    flag_source: str | None = None
     check_in_accuracy_m: float | None = None
     check_in_distance_m: float
     check_out_accuracy_m: float | None = None
@@ -113,12 +114,15 @@ class PayrollSummaryOut(BaseModel):
     paid_amount: int
     day_total_rounded: int
     pending_amount: int
+    blocked_amount: int = 0
     can_approve: bool
     unreviewed_flag_session_ids: list[int]
     hourly_rate: int | None = None
     has_open_session: bool = False
+    has_sessions: bool = False
     needs_review_session_ids: list[int] = []
     pending_reason: str | None = None
+    pending_reasons: list[str] = []
 
 
 class OutputSubmitOut(BaseModel):
@@ -172,12 +176,17 @@ class ReportTimeseriesOut(BaseModel):
 class HistorySessionOut(WorkSessionOut):
     pay_batch_id: int | None = None
     pending_reason: str | None = None
+    output_locked: bool = False
+    output_locked_at: str | None = None
     output: list[ProductTotalOut] = []
 
 
 class HistoryDayOut(BaseModel):
     date: date
     total_amount: int
+    paid_amount: int = 0
+    pending_amount: int = 0
+    blocked_amount: int = 0
     batches: list[dict]
     unpaid_sessions: list[HistorySessionOut]
 

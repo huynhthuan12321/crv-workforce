@@ -13,6 +13,7 @@ import {
   mockReportSummary,
   mockPayroll,
   mockPayrollADetail,
+  mockPayrollRealPhone,
   mockReviewPending,
   mockReviewResolved,
   mockWorkingNow,
@@ -92,7 +93,7 @@ class MockApi {
       {employee_id: 4, batch_id: 21, batch_no: 1, amount: 168000},
     ] as T;
     if (path.startsWith("/payroll/1")) return mockPayrollADetail as T;
-    if (path.startsWith("/payroll")) return (this.scenario === "manager_payroll_empty" ? [] : mockPayroll) as T;
+    if (path.startsWith("/payroll")) return (this.scenario === "manager_payroll_empty" ? [] : this.scenario === "manager_payroll_real_phone" ? mockPayrollRealPhone : mockPayroll) as T;
     if (path.startsWith("/employees/1/rates") && options.method === "POST") return {id: 9, hourly_rate: 32000, effective_from: "2024-04-25"} as T;
     if (path.startsWith("/employees/1/rates")) return [
       {id: 1, hourly_rate: 30000, effective_from: "2024-04-24"},

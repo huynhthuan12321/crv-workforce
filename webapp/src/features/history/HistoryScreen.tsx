@@ -3,6 +3,7 @@ import {api} from "../../api/client";
 import {Card, Chip, ScreenState, SectionTitle} from "../../components/ui";
 import {fmtDateLong, fmtTime, fmtDuration} from "../../lib/date-vn";
 import {fmtKg, fmtMoney, totalKg} from "../../lib/format";
+import {gpsLabel} from "../../lib/gps-label";
 import type {History, HistorySession} from "../../types/api";
 
 const reasonLabels: Record<string, string> = {
@@ -11,12 +12,6 @@ const reasonLabels: Record<string, string> = {
   co_co_gps: "Có cờ GPS chưa xử lý",
   cho_duyet: "Chờ duyệt",
 };
-
-function gpsLabel(session: HistorySession) {
-  if (session.flags.includes("gps_out_of_range")) return `Ngoài xưởng (${Math.round(session.check_in_distance_m)} m)`;
-  if (session.flags.includes("gps_low_accuracy")) return "GPS sai số lớn";
-  return "Trong xưởng";
-}
 
 function SessionList({sessions, showReason = false}: {sessions: HistorySession[]; showReason?: boolean}) {
   return (
@@ -51,15 +46,18 @@ export function HistoryScreen() {
   return (
     <div className="screen-stack">
       {history.days.map((day) => {
-        const paid = day.batches.reduce((sum, batch) => sum + batch.amount, 0);
-        const pending = Math.max(0, day.total_amount - paid);
+        const paid = day.paid_amount;
+        const pending = day.pending_amount;
+        const blocked = day.blocked_amount;
         return (
           <Card key={day.date}>
             <SectionTitle eyebrow={fmtDateLong(`${day.date}T00:00:00+07:00`)} title={fmtMoney(day.total_amount)} />
             <div className="mini-grid">
               <div className="metric metric--success"><small>Đã trả</small><b>{fmtMoney(paid)}</b></div>
               <div className="metric metric--warning"><small>Chờ duyệt</small><b>{fmtMoney(pending)}</b></div>
+              <div className="metric metric--info"><small>Chờ quản lý xem lại</small><b>{fmtMoney(blocked)}</b></div>
             </div>
+            {blocked > 0 && <p className="muted">Có phiên cần quản lý xem lại vị trí trước khi duyệt.</p>}
             {day.batches.map((batch) => (
               <div key={batch.id} className="history-block history-block--paid">
                 <div className="history-block__head"><b>Đợt {batch.batch_no} · Đã trả</b><Chip tone="success">{fmtMoney(batch.amount)}</Chip></div>

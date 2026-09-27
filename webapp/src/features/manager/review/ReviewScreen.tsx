@@ -2,12 +2,13 @@ import {useCallback, useEffect, useState} from "react";
 import {ApiError, api} from "../../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../components/ui";
 import {fmtDate, fmtDateLong, fmtTime} from "../../../lib/date-vn";
+import {gpsLabel} from "../../../lib/gps-label";
 import {hapticImpact, hapticNotify} from "../../../lib/haptic";
 import type {ReviewItem} from "../../../types/api";
 import {errorText, reviewType, sessionTime, useBackButton} from "../shared";
 
-export function ReviewScreen() {
-  const [filter, setFilter] = useState<"all" | "gps" | "forgot">("all");
+export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "gps" | "forgot"} = {}) {
+  const [filter, setFilter] = useState<"all" | "gps" | "forgot">(initialFilter);
   const [mode, setMode] = useState<"pending" | "resolved">(
     new URLSearchParams(window.location.search).get("scenario") === "manager_review_resolved" ? "resolved" : "pending",
   );
@@ -37,6 +38,7 @@ export function ReviewScreen() {
   }, [filter]);
 
   useEffect(() => void load(), [load]);
+  useEffect(() => setFilter(initialFilter), [initialFilter]);
 
   const markFlags = async (row: ReviewItem) => {
     hapticImpact();
@@ -93,7 +95,7 @@ export function ReviewScreen() {
               <Chip tone={type === "gps" ? "warning" : "danger"}>{type === "gps" ? "GPS" : "Quên ra ca"}</Chip>
             </div>
             {type === "gps" ? (
-              <p className="muted">Khoảng cách {Math.round(row.check_in_distance_m)} m · Sai số {Math.round(row.check_in_accuracy_m ?? 0)} m</p>
+              <p className="muted">{gpsLabel(row)}</p>
             ) : (
               <p className="muted">Cần nhập giờ ra và lý do xử lý.</p>
             )}

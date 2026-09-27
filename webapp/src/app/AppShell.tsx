@@ -43,7 +43,7 @@ export function AppShell({
           {employee.tabs.map((item) => (
             <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => onTab(item)}>
               <span>{tabIcons[item]}</span>
-              {tabLabels[item]}
+              <em>{tabLabels[item]}</em>
             </button>
           ))}
         </nav>
