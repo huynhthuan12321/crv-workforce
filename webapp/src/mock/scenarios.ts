@@ -231,7 +231,7 @@ export const mockPayrollADetail: PayrollDetail = {
   sessions: [
     {...closedSession, pay_batch_id: 1, is_locked: true},
     {...afternoonSession, pay_batch_id: null, is_locked: false},
-    {...openSession, id: 104, pay_batch_id: null, is_locked: false},
+    {...openSession, id: 104, check_in_at: "2024-04-24T17:20:00+07:00", pay_batch_id: null, is_locked: false},
   ],
   batches: [{id: 1, batch_no: 1, amount: 162000, approved_by: 10, approved_at: "2024-04-24T12:00:00+07:00"}],
 };

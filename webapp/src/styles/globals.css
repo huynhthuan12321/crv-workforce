@@ -761,6 +761,35 @@ input:disabled {
   flex-wrap: nowrap;
 }
 
+.date-nav__label,
+.date-label {
+  color: var(--crv-hint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.select-all-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--crv-border);
+  border-radius: 14px;
+  background: var(--crv-card);
+  color: var(--crv-text);
+  font-size: 13px;
+}
+
+.select-all-row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--crv-primary);
+}
+
+.payroll-screen {
+  padding-bottom: calc(156px + env(safe-area-inset-bottom));
+}
+
 .date-nav button {
   width: 36px;
   height: 36px;
@@ -779,7 +808,7 @@ input:disabled {
   gap: 8px;
   border: 1px solid var(--crv-border);
   border-radius: 22px;
-  background: color-mix(in srgb, var(--crv-card) 94%, transparent);
+  background: var(--crv-card);
   box-shadow: 0 10px 28px var(--crv-shadow);
   padding: 12px;
 }
