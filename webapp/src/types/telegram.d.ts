@@ -25,6 +25,7 @@ interface TelegramWebApp {
   expand(): void;
   close(): void;
   sendData(data: string): void;
+  openTelegramLink(url: string): void;
   setHeaderColor(color: string): void;
   setBackgroundColor(color: string): void;
   enableClosingConfirmation(): void;

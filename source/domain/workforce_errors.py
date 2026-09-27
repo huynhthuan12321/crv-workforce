@@ -34,6 +34,11 @@ MESSAGES = {
     "SESSION_OVERLAP": "Khoảng thời gian bị chồng lấn với phiên khác.",
     "NO_ELIGIBLE_SESSIONS": "Không có dữ liệu để duyệt.",
     "TOO_FAST": "Thao tác quá nhanh, vui lòng thử lại sau.",
+    "EMPLOYEE_NOT_FOUND": "Không tìm thấy nhân viên.",
+    "EMPLOYEE_HAS_OPEN_SESSION": "Nhân viên đang trong ca, không thể khóa.",
+    "INVALID_EMPLOYEE_DATA": "Dữ liệu nhân viên không hợp lệ.",
+    "RATE_DATE_IN_PAST": "Ngày hiệu lực không được trước hôm nay.",
+    "RATE_DATE_EXISTS": "Ngày hiệu lực này đã có đơn giá.",
 }
 
 

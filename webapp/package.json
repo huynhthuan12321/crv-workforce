@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:overflow": "node scripts/assert-no-horizontal-overflow.mjs",
     "screenshots:gd7ab": "node scripts/capture-gd7ab-screenshots.mjs",
+    "screenshots:gd7c": "node scripts/capture-gd7c-screenshots.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,7 +7,7 @@ from source.api.dependencies import get_session
 from source.api.workforce_auth import manager_or_director
 from source.database.models import EmployeeOrm
 from source.domain.workforce_errors import WorkforceError
-from source.schemas.workforce import DataResponse, WorkSessionOut
+from source.schemas.workforce import DataResponse, ReviewResolvedOut, ReviewSessionOut, WorkSessionOut
 from source.services.workforce import ReviewService, session_dict
 from source.utils.clock import to_vn
 
@@ -41,14 +41,22 @@ class EditBody(BaseModel):
             raise ValueError(exc.code) from exc
 
 
-@router.get("/pending")
-async def pending(_: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    return {"data": await ReviewService(session).pending()}
+@router.get("/pending", response_model=DataResponse[list[ReviewSessionOut]])
+async def pending(
+    type: str | None = Query(default=None, pattern="^(gps|forgot)$"),
+    _: EmployeeOrm = Depends(manager_or_director),
+    session: AsyncSession = Depends(get_session),
+):
+    return {"data": await ReviewService(session).pending(type)}
 
 
-@router.get("/resolved")
-async def resolved(_: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    return {"data": await ReviewService(session).list_resolved()}
+@router.get("/resolved", response_model=DataResponse[list[ReviewResolvedOut]])
+async def resolved(
+    type: str | None = Query(default=None, pattern="^(gps|forgot)$"),
+    _: EmployeeOrm = Depends(manager_or_director),
+    session: AsyncSession = Depends(get_session),
+):
+    return {"data": await ReviewService(session).list_resolved(type)}
 
 
 @router.post("/{session_id}/flags-reviewed", response_model=DataResponse[WorkSessionOut])

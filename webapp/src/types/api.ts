@@ -33,8 +33,11 @@ export type WorkSession = {
   rate_snapshot: number;
   amount_raw: number | null;
   status: WorkSessionStatus;
+  review_reason?: string | null;
   flags: string[];
+  check_in_accuracy_m?: number | null;
   check_in_distance_m: number;
+  check_out_accuracy_m?: number | null;
   check_out_distance_m: number | null;
 };
 
@@ -115,4 +118,84 @@ export type LocationPayload = {
 export type AuthData = {
   token: string;
   employee: Employee;
+};
+
+export type WorkingNowItem = {
+  session_id: number;
+  employee_id: number;
+  code: string;
+  full_name: string;
+  check_in_at: string;
+  minutes_worked: number;
+  flags: string[];
+  check_in_distance_m: number | null;
+  check_in_accuracy_m: number | null;
+  is_outside: boolean;
+};
+
+export type ReviewItem = WorkSession & {
+  employee_code: string;
+  employee_name: string;
+  resolved_by?: number | null;
+  resolved_by_name?: string | null;
+  resolved_at?: string | null;
+  resolved_action?: "flags_reviewed" | "session_closed";
+  reason?: string | null;
+};
+
+export type PayrollSummary = {
+  employee_id: number;
+  code: string;
+  full_name: string;
+  work_date: string;
+  hourly_rate: number | null;
+  closed_minutes: number;
+  eligible_minutes: number;
+  eligible_session_ids: number[];
+  paid_amount: number;
+  day_total_rounded: number;
+  pending_amount: number;
+  can_approve: boolean;
+  unreviewed_flag_session_ids: number[];
+  has_open_session: boolean;
+  needs_review_session_ids: number[];
+  pending_reason: "open_session" | "unreviewed_gps" | "forgot_checkout" | null;
+};
+
+export type PayrollSession = WorkSession & {
+  pay_batch_id: number | null;
+  is_locked: boolean;
+};
+
+export type PayrollBatch = {
+  id: number;
+  batch_no: number;
+  amount: number;
+  approved_by: number;
+  approved_at: string;
+};
+
+export type PayrollDetail = PayrollSummary & {
+  sessions: PayrollSession[];
+  batches: PayrollBatch[];
+};
+
+export type PayrollApproveResult = {
+  employee_id: number;
+  batch_id: number;
+  batch_no: number;
+  amount: number;
+};
+
+export type ManagedEmployee = Employee & {
+  current_hourly_rate: number | null;
+  is_linked: boolean;
+  has_open_session: boolean;
+  invite_url?: string | null;
+};
+
+export type RateHistory = {
+  id: number;
+  hourly_rate: number;
+  effective_from: string;
 };

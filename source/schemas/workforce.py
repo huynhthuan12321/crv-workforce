@@ -36,9 +36,25 @@ class WorkSessionOut(BaseModel):
     rate_snapshot: int
     amount_raw: float | None
     status: str
+    review_reason: str | None = None
     flags: list[str]
+    check_in_accuracy_m: float | None = None
     check_in_distance_m: float
+    check_out_accuracy_m: float | None = None
     check_out_distance_m: float | None
+
+
+class ReviewSessionOut(WorkSessionOut):
+    employee_code: str
+    employee_name: str
+
+
+class ReviewResolvedOut(ReviewSessionOut):
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: str | None = None
+    resolved_action: str
+    reason: str | None = None
 
 
 class TodayOut(BaseModel):
@@ -54,6 +70,9 @@ class EmployeeOut(BaseModel):
     role: str
     telegram_id: int | None = None
     is_active: bool | None = None
+    current_hourly_rate: int | None = None
+    is_linked: bool | None = None
+    has_open_session: bool | None = None
 
 
 class WorkingNowOut(BaseModel):
@@ -64,6 +83,9 @@ class WorkingNowOut(BaseModel):
     check_in_at: str
     minutes_worked: int
     flags: list[str]
+    check_in_distance_m: float | None = None
+    check_in_accuracy_m: float | None = None
+    is_outside: bool = False
 
 
 class PayBatchOut(BaseModel):
@@ -89,6 +111,10 @@ class PayrollSummaryOut(BaseModel):
     pending_amount: int
     can_approve: bool
     unreviewed_flag_session_ids: list[int]
+    hourly_rate: int | None = None
+    has_open_session: bool = False
+    needs_review_session_ids: list[int] = []
+    pending_reason: str | None = None
 
 
 class OutputSubmitOut(BaseModel):

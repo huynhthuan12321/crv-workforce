@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from "react";
+import {useCallback, useEffect, useState, type ComponentType} from "react";
 import {ApiError, api} from "../api/client";
 import {ErrorBoundary} from "../components/ErrorBoundary";
 import {ScreenState} from "../components/ui";
@@ -8,9 +8,9 @@ import {AttendanceScreen} from "../features/attendance/AttendanceScreen";
 import {ConsentGate} from "../features/consent/ConsentGate";
 import {PrivacyScreen} from "../features/consent/PrivacyScreen";
 import {HistoryScreen} from "../features/history/HistoryScreen";
+import {EmployeesScreen, PayrollScreen, ReviewScreen, WorkingScreen} from "../features/manager/ManagerScreens";
 import {OutputsScreen} from "../features/outputs/OutputsScreen";
 import {useTelegram} from "../hooks/useTelegram";
-import {MockToolbar} from "../mock/MockToolbar";
 import type {Employee, TabKey} from "../types/api";
 import {AppShell, type SpecialScreen} from "./AppShell";
 import {tabLabels} from "./labels";
@@ -30,6 +30,25 @@ function useBackButton(active: boolean, onBack: () => void) {
       back.hide();
     };
   }, [active, onBack]);
+}
+
+const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
+
+function MockToolbarHost({onChange}: {onChange: () => void}) {
+  const [Toolbar, setToolbar] = useState<ComponentType<{onChange: () => void}> | null>(null);
+
+  useEffect(() => {
+    if (!USE_MOCK) return;
+    let active = true;
+    void import("../mock/MockToolbar").then((module) => {
+      if (active) setToolbar(() => module.MockToolbar);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return Toolbar ? <Toolbar onChange={onChange} /> : null;
 }
 
 export function CrvApp() {
@@ -71,7 +90,7 @@ export function CrvApp() {
   if (loginError) {
     return (
       <>
-        <MockToolbar onChange={() => setMockRefresh((x) => x + 1)} />
+        <MockToolbarHost onChange={() => setMockRefresh((x) => x + 1)} />
         <AccessScreen code={loginError.code} onRetry={login} />
       </>
     );
@@ -89,16 +108,16 @@ export function CrvApp() {
     attendance: <AttendanceScreen onNeedConsent={() => setSpecial("consent")} onCheckedOut={(id) => { setRecentOutputSessionId(id); setTab("outputs"); }} />,
     outputs: <OutputsScreen recentSessionId={recentOutputSessionId} />,
     history: <HistoryScreen />,
-    working: <PlaceholderScreen title={tabLabels.working} />,
-    review: <PlaceholderScreen title={tabLabels.review} />,
-    payroll: <PlaceholderScreen title={tabLabels.payroll} />,
-    employees: <PlaceholderScreen title={tabLabels.employees} />,
+    working: <WorkingScreen />,
+    review: <ReviewScreen />,
+    payroll: <PayrollScreen />,
+    employees: <EmployeesScreen />,
     reports: <PlaceholderScreen title={tabLabels.reports} />,
   };
 
   return (
     <>
-      <MockToolbar onChange={() => setMockRefresh((x) => x + 1)} />
+      <MockToolbarHost onChange={() => setMockRefresh((x) => x + 1)} />
       <AppShell
         employee={user}
         tab={tab}

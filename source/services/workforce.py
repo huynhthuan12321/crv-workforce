@@ -65,6 +65,14 @@ def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
     return bool(row.flags) and row.flags_reviewed_at is None
 
 
+def _review_type(row: WorkSessionOrm) -> str | None:
+    if row.status == SessionStatus.needs_review or row.review_reason == "forgot_checkout":
+        return "forgot"
+    if _has_unreviewed_flags(row):
+        return "gps"
+    return None
+
+
 def _vn(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=VIETNAM_TZ)
@@ -116,6 +124,36 @@ async def create_invite(session: AsyncSession, employee: EmployeeOrm, actor_id: 
     session.add(InviteCodeOrm(employee_id=employee.id, code=code_value, created_by=actor_id,
                               expires_at=now + timedelta(days=settings.rules.invite_expire_days)))
     return invite_url(code_value)
+
+
+async def current_hourly_rate(session: AsyncSession, employee_id: int, day: date | None = None) -> int | None:
+    day = day or _vn(Clock().now()).date()
+    return await session.scalar(select(RateHistoryOrm.hourly_rate).where(
+        RateHistoryOrm.employee_id == employee_id,
+        RateHistoryOrm.effective_from <= day,
+    ).order_by(RateHistoryOrm.effective_from.desc()).limit(1))
+
+
+async def has_open_session(session: AsyncSession, employee_id: int) -> bool:
+    opened = await session.scalar(select(WorkSessionOrm.id).where(
+        WorkSessionOrm.employee_id == employee_id,
+        WorkSessionOrm.status == SessionStatus.open,
+    ).limit(1))
+    return opened is not None
+
+
+async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date | None = None) -> dict:
+    return {
+        "id": row.id,
+        "code": row.code,
+        "full_name": row.full_name,
+        "role": row.role.value,
+        "telegram_id": row.telegram_id,
+        "is_active": row.is_active,
+        "current_hourly_rate": await current_hourly_rate(session, row.id, day),
+        "is_linked": row.telegram_id is not None,
+        "has_open_session": await has_open_session(session, row.id),
+    }
 
 
 class AuthService:
@@ -280,6 +318,9 @@ class WorkingService:
                 "check_in_at": iso_vn(row.check_in_at),
                 "minutes_worked": max(0, int((now - check_in).total_seconds() // 60)),
                 "flags": row.flags or [],
+                "check_in_distance_m": float(row.check_in_distance_m) if row.check_in_distance_m is not None else None,
+                "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
+                "is_outside": "gps_out_of_range" in (row.flags or []),
             })
         return result
 
@@ -336,37 +377,66 @@ class ReviewService:
     def __init__(self, session: AsyncSession, clock: Clock | None = None):
         self.session, self.clock = session, clock or Clock()
 
-    async def pending(self) -> list[dict]:
+    async def _review_item(self, row: WorkSessionOrm) -> dict:
+        employee = await self.session.get(EmployeeOrm, row.employee_id)
+        return session_dict(row) | {
+            "employee_code": employee.code if employee else "",
+            "employee_name": employee.full_name if employee else "",
+            "review_reason": row.review_reason,
+        }
+
+    async def _handled_details(self, row: WorkSessionOrm | None) -> dict:
+        if not row:
+            return {}
+        actor_id = row.flags_reviewed_by or row.closed_by
+        actor = await self.session.get(EmployeeOrm, actor_id) if actor_id else None
+        handled_at = row.flags_reviewed_at or row.updated_at
+        return {
+            "handled_by_name": actor.full_name if actor else None,
+            "handled_at": iso_vn(handled_at) if handled_at else None,
+            "action": "flags_reviewed" if row.flags_reviewed_at else "session_closed",
+        }
+
+    async def pending(self, type_: str | None = None) -> list[dict]:
         rows = (await self.session.scalars(select(WorkSessionOrm).where(or_(
             WorkSessionOrm.status == SessionStatus.needs_review,
             WorkSessionOrm.status == SessionStatus.closed,
         )).order_by(WorkSessionOrm.check_in_at))).all()
-        return [session_dict(x) for x in rows
-                if x.status == SessionStatus.needs_review or _has_unreviewed_flags(x)]
+        result = []
+        for row in rows:
+            row_type = _review_type(row)
+            if not row_type or (type_ and row_type != type_):
+                continue
+            result.append(await self._review_item(row))
+        return result
 
     async def mark_flags(self, actor: EmployeeOrm, session_id: int) -> WorkSessionOrm:
         row = await self.session.scalar(select(WorkSessionOrm).where(WorkSessionOrm.id == session_id).with_for_update())
         if not row or row.flags_reviewed_at:
-            raise fail("ALREADY_HANDLED")
+            raise fail("ALREADY_HANDLED", details=await self._handled_details(row))
         row.flags_reviewed_by, row.flags_reviewed_at = actor.id, _vn(self.clock.now())
         self.session.add(AuditLogOrm(actor_id=actor.id, action="flags_reviewed", entity_type="work_session", entity_id=row.id))
         return row
 
-    async def list_resolved(self) -> list[dict]:
+    async def list_resolved(self, type_: str | None = None) -> list[dict]:
         rows = (await self.session.scalars(select(WorkSessionOrm).where(or_(
             WorkSessionOrm.flags_reviewed_at.is_not(None),
             WorkSessionOrm.closed_by.is_not(None),
         )).order_by(WorkSessionOrm.updated_at.desc()))).all()
         resolved = []
         for row in rows:
+            row_type = "gps" if row.flags_reviewed_at else "forgot"
+            if type_ and row_type != type_:
+                continue
             resolved_by = row.flags_reviewed_by or row.closed_by
             actor = await self.session.get(EmployeeOrm, resolved_by) if resolved_by else None
-            data = session_dict(row)
+            data = await self._review_item(row)
             data.update({
                 "resolved_by": resolved_by,
                 "resolved_by_name": actor.full_name if actor else None,
-                "resolved_at": row.flags_reviewed_at or row.updated_at,
+                "resolved_at": iso_vn(row.flags_reviewed_at or row.updated_at),
                 "resolved_action": "flags_reviewed" if row.flags_reviewed_at else "session_closed",
+                "reason": row.review_reason,
             })
             resolved.append(data)
         return resolved
@@ -376,7 +446,7 @@ class ReviewService:
         check_out_vn = to_vn(check_out)
         row = await self.session.scalar(select(WorkSessionOrm).where(WorkSessionOrm.id == session_id).with_for_update())
         if not row or row.status != SessionStatus.needs_review:
-            raise fail("ALREADY_HANDLED")
+            raise fail("ALREADY_HANDLED", details=await self._handled_details(row))
         if len(reason.strip()) < 5 or len(reason) > 200:
             raise fail("REASON_REQUIRED", 422)
         check_in_vn = _vn(row.check_in_at)
@@ -527,11 +597,21 @@ class PayrollService:
         rounded = ceil_money(raw) if raw else 0
         pending_amount = max(0, rounded - paid)
         unreviewed = [row.id for row in all_sessions if _has_unreviewed_flags(row)]
+        needs_review = [row.id for row in all_sessions if row.status == SessionStatus.needs_review]
+        has_open = any(row.status == SessionStatus.open for row in all_sessions)
+        pending_reason = None
+        if has_open:
+            pending_reason = "open_session"
+        elif unreviewed:
+            pending_reason = "unreviewed_gps"
+        elif needs_review:
+            pending_reason = "forgot_checkout"
         return {
             "employee_id": employee.id,
             "code": employee.code,
             "full_name": employee.full_name,
             "work_date": str(day),
+            "hourly_rate": await current_hourly_rate(self.session, employee.id, day),
             "closed_minutes": sum((row.minutes or 0) for row in all_sessions if row.status == SessionStatus.closed),
             "eligible_minutes": sum((row.minutes or 0) for row in eligible),
             "eligible_session_ids": [row.id for row in eligible],
@@ -540,6 +620,9 @@ class PayrollService:
             "pending_amount": pending_amount,
             "can_approve": bool(eligible),
             "unreviewed_flag_session_ids": unreviewed,
+            "has_open_session": has_open,
+            "needs_review_session_ids": needs_review,
+            "pending_reason": pending_reason,
         }
 
     async def list_payroll(self, day: date) -> list[dict]:
@@ -563,13 +646,16 @@ class PayrollService:
             PayBatchOrm.work_date == day,
         ).order_by(PayBatchOrm.batch_no))).all())
         summary.update({
-            "sessions": [session_dict(row) | {"pay_batch_id": row.pay_batch_id} for row in sessions],
+            "sessions": [session_dict(row) | {
+                "pay_batch_id": row.pay_batch_id,
+                "is_locked": row.pay_batch_id is not None,
+            } for row in sessions],
             "batches": [{
                 "id": batch.id,
                 "batch_no": batch.batch_no,
                 "amount": batch.amount,
                 "approved_by": batch.approved_by,
-                "approved_at": batch.approved_at,
+                "approved_at": iso_vn(batch.approved_at),
             } for batch in batches],
         })
         return summary
@@ -788,9 +874,94 @@ class ReportService:
         return rows
 
 
+class EmployeeService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session, self.clock = session, clock or Clock()
+
+    async def list(self, q: str | None = None, active: bool | None = None) -> list[dict]:
+        query = select(EmployeeOrm).where(EmployeeOrm.role == EmployeeRole.employee)
+        if active is not None:
+            query = query.where(EmployeeOrm.is_active.is_(active))
+        if q:
+            like = f"%{q.strip()}%"
+            query = query.where(or_(EmployeeOrm.code.ilike(like), EmployeeOrm.full_name.ilike(like)))
+        rows = (await self.session.scalars(query.order_by(EmployeeOrm.code))).all()
+        return [await employee_admin_dict(self.session, row, _vn(self.clock.now()).date()) for row in rows]
+
+    async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int, effective_from: date) -> dict:
+        employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, self.clock)
+        data = await employee_admin_dict(self.session, employee, effective_from)
+        return data | {"invite_url": invite}
+
+    async def lock(self, actor: EmployeeOrm, employee_id: int) -> dict:
+        row = await self.session.get(EmployeeOrm, employee_id)
+        if not row:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        if row.id == actor.id:
+            raise fail("FORBIDDEN", 403)
+        if await has_open_session(self.session, employee_id):
+            raise fail("EMPLOYEE_HAS_OPEN_SESSION")
+        row.is_active = False
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_locked", entity_type="employee", entity_id=row.id))
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+
+    async def unlock(self, actor: EmployeeOrm, employee_id: int) -> dict:
+        row = await self.session.get(EmployeeOrm, employee_id)
+        if not row:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        row.is_active = True
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_unlocked", entity_type="employee", entity_id=row.id))
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+
+    async def regenerate_invite(self, actor: EmployeeOrm, employee_id: int) -> dict:
+        row = await self.session.get(EmployeeOrm, employee_id)
+        if not row:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        if row.telegram_id:
+            data = await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+            return data | {"invite_url": None}
+        invite = await create_invite(self.session, row, actor.id, self.clock.now())
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="invite_regenerated", entity_type="employee", entity_id=row.id))
+        data = await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+        return data | {"invite_url": invite}
+
+    async def rates(self, employee_id: int) -> list[dict]:
+        employee = await self.session.get(EmployeeOrm, employee_id)
+        if not employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        rows = (await self.session.scalars(select(RateHistoryOrm).where(
+            RateHistoryOrm.employee_id == employee_id,
+        ).order_by(RateHistoryOrm.effective_from.desc()))).all()
+        return [{"id": x.id, "hourly_rate": x.hourly_rate, "effective_from": x.effective_from} for x in rows]
+
+    async def add_rate(self, actor: EmployeeOrm, employee_id: int, hourly_rate: int, effective_from: date) -> dict:
+        employee = await self.session.get(EmployeeOrm, employee_id)
+        if not employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        today = _vn(self.clock.now()).date()
+        if effective_from < today:
+            raise fail("RATE_DATE_IN_PAST", 422)
+        exists = await self.session.scalar(select(RateHistoryOrm.id).where(
+            RateHistoryOrm.employee_id == employee_id,
+            RateHistoryOrm.effective_from == effective_from,
+        ))
+        if exists:
+            raise fail("RATE_DATE_EXISTS", 409)
+        row = RateHistoryOrm(employee_id=employee_id, hourly_rate=hourly_rate,
+                             effective_from=effective_from, created_by=actor.id)
+        self.session.add(row)
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="rate_added",
+                                     entity_type="employee", entity_id=employee_id,
+                                     new_value={"hourly_rate": hourly_rate, "effective_from": str(effective_from)}))
+        await self.session.flush()
+        return {"id": row.id, "hourly_rate": row.hourly_rate, "effective_from": row.effective_from}
+
+
 async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, name: str,
-                          hourly_rate: int, effective_from: date) -> tuple[EmployeeOrm, str]:
-    today = _vn(Clock().now()).date()
+                          hourly_rate: int, effective_from: date,
+                          clock: Clock | None = None) -> tuple[EmployeeOrm, str]:
+    clock = clock or Clock()
+    today = _vn(clock.now()).date()
     if effective_from < today or hourly_rate <= 0:
         raise fail("INVALID_EMPLOYEE_DATA", 422)
     employee = EmployeeOrm(code=code, full_name=name, role=EmployeeRole.employee)
@@ -798,7 +969,7 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
     await session.flush()
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=hourly_rate,
                                effective_from=effective_from, created_by=actor.id))
-    invite = await create_invite(session, employee, actor.id)
+    invite = await create_invite(session, employee, actor.id, clock.now())
     session.add(AuditLogOrm(actor_id=actor.id, action="employee_created", entity_type="employee", entity_id=employee.id))
     return employee, invite
 
@@ -810,6 +981,8 @@ def session_dict(row: WorkSessionOrm | None) -> dict | None:
             "check_in_at": iso_vn(row.check_in_at), "check_out_at": iso_vn(row.check_out_at),
             "minutes": row.minutes, "rate_snapshot": row.rate_snapshot,
             "amount_raw": float(row.amount_raw) if row.amount_raw is not None else None,
-            "status": row.status.value, "flags": row.flags or [],
+            "status": row.status.value, "review_reason": row.review_reason, "flags": row.flags or [],
+            "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
             "check_in_distance_m": float(row.check_in_distance_m),
+            "check_out_accuracy_m": float(row.check_out_accuracy_m) if row.check_out_accuracy_m is not None else None,
             "check_out_distance_m": float(row.check_out_distance_m) if row.check_out_distance_m is not None else None}
