@@ -130,6 +130,13 @@ class ProductTotalOut(BaseModel):
     kg: float
 
 
+class ReportEmployeeOut(BaseModel):
+    id: int
+    code: str
+    full_name: str
+    is_active: bool
+
+
 class ReportSummaryOut(BaseModel):
     from_: date = Field(alias="from")
     to: date

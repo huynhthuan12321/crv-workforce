@@ -177,6 +177,7 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("GET", f"/api/reports/summary?period=day&date={NOW.date()}", {"director"}, None),
         ("GET", f"/api/reports/products?period=day&date={NOW.date()}", {"director"}, None),
         ("GET", f"/api/reports/timeseries?period=day&date={NOW.date()}", {"director"}, None),
+        ("GET", "/api/reports/employees", {"director"}, None),
     ]
 
 

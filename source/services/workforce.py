@@ -787,6 +787,14 @@ class ReportService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def employees(self, q: str | None = None) -> list[dict]:
+        query = select(EmployeeOrm).where(EmployeeOrm.role == EmployeeRole.employee)
+        if q:
+            like = f"%{q.strip()}%"
+            query = query.where(or_(EmployeeOrm.code.ilike(like), EmployeeOrm.full_name.ilike(like)))
+        rows = (await self.session.scalars(query.order_by(EmployeeOrm.code))).all()
+        return [{"id": row.id, "code": row.code, "full_name": row.full_name, "is_active": row.is_active} for row in rows]
+
     @staticmethod
     def bounds(period: str, day: date) -> tuple[date, date]:
         if period == "day":
