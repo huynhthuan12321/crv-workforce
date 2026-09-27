@@ -35,6 +35,7 @@ export type WorkSession = {
   status: WorkSessionStatus;
   review_reason?: string | null;
   flags: string[];
+  flag_source?: "check_in" | "check_out" | "both" | string | null;
   check_in_accuracy_m?: number | null;
   check_in_distance_m: number;
   check_out_accuracy_m?: number | null;
@@ -89,6 +90,8 @@ export type OutputSubmit = {
 export type HistorySession = WorkSession & {
   pay_batch_id: number | null;
   pending_reason: string | null;
+  output_locked?: boolean;
+  output_locked_at?: string | null;
   output: ProductTotal[];
 };
 
@@ -103,6 +106,9 @@ export type HistoryBatch = {
 export type HistoryDay = {
   date: string;
   total_amount: number;
+  paid_amount: number;
+  pending_amount: number;
+  blocked_amount: number;
   batches: HistoryBatch[];
   unpaid_sessions: HistorySession[];
 };
@@ -132,8 +138,11 @@ export type WorkingNowItem = {
   check_in_at: string;
   minutes_worked: number;
   flags: string[];
+  flag_source?: "check_in" | "check_out" | "both" | string | null;
   check_in_distance_m: number | null;
   check_in_accuracy_m: number | null;
+  check_out_distance_m?: number | null;
+  check_out_accuracy_m?: number | null;
   is_outside: boolean;
   server_now: string;
 };
@@ -160,11 +169,14 @@ export type PayrollSummary = {
   paid_amount: number;
   day_total_rounded: number;
   pending_amount: number;
+  blocked_amount: number;
   can_approve: boolean;
   unreviewed_flag_session_ids: number[];
   has_open_session: boolean;
+  has_sessions: boolean;
   needs_review_session_ids: number[];
   pending_reason: "open_session" | "unreviewed_gps" | "forgot_checkout" | null;
+  pending_reasons: Array<"open_session" | "unreviewed_gps" | "forgot_checkout" | string>;
 };
 
 export type PayrollSession = WorkSession & {

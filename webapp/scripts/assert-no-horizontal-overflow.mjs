@@ -17,10 +17,16 @@ try {
         const result = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
+          clipped: Array.from(document.querySelectorAll(".bottom-tabs button, .bottom-tabs button em, .chip"))
+            .filter((el) => el.scrollWidth > el.clientWidth + 1)
+            .map((el) => `${el.className || el.tagName}: ${el.textContent?.trim()} (${el.scrollWidth}>${el.clientWidth})`),
         }));
         await page.close();
         if (result.scrollWidth !== result.clientWidth) {
           failures.push(`${width}px ${theme} ${scenario}: scroll=${result.scrollWidth}, client=${result.clientWidth}`);
+        }
+        if (result.clipped.length) {
+          failures.push(`${width}px ${theme} ${scenario}: clipped ${result.clipped.join("; ")}`);
         }
       }
     }

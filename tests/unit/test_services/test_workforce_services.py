@@ -25,9 +25,11 @@ from source.domain.workforce_errors import WorkforceError
 from source.enums import EmployeeRole, SessionStatus
 from source.services.workforce import (
     AttendanceService,
+    HistoryService,
     OutputService,
     PayrollService,
     ReviewService,
+    session_dict,
 )
 from source.utils.clock import FakeClock, VIETNAM_TZ
 from source.workers import notification_text
@@ -571,6 +573,71 @@ async def test_payroll_open_session_does_not_block_and_listing(session):
 
     detail = await PayrollService(session).get_employee_payroll_detail(employee.id, day)
     assert detail["batches"][0]["amount"] == 30_000
+
+
+@pytest.mark.unit
+async def test_payroll_summary_distinguishes_no_sessions_gps_blocked_and_open(session):
+    employee = await make_employee(session, "NV001")
+    empty_employee = await make_employee(session, "NV002")
+    first = await closed_session(session, employee, dt(7, 0), dt(8, 0), flags=["gps_out_of_range"])
+    first.check_in_distance_m = Decimal("9")
+    first.check_out_distance_m = Decimal("230")
+    second = await closed_session(session, employee, dt(9, 0), dt(10, 0), flags=["gps_out_of_range"])
+    second.check_in_distance_m = Decimal("9")
+    second.check_out_distance_m = Decimal("180")
+    session.add(WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(11, 0),
+        check_in_lat=Decimal("10.0"),
+        check_in_lng=Decimal("106.0"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("9"),
+        rate_snapshot=30_000,
+        status=SessionStatus.open,
+        flags=[],
+    ))
+    await session.flush()
+
+    rows = await PayrollService(session, FakeClock(dt(17, 20))).list_payroll(date(2026, 4, 24))
+    by_code = {row["code"]: row for row in rows}
+
+    assert by_code["NV001"]["has_sessions"] is True
+    assert by_code["NV001"]["pending_reason"] == "unreviewed_gps"
+    assert by_code["NV001"]["pending_reasons"] == ["unreviewed_gps", "open_session"]
+    assert by_code["NV001"]["blocked_amount"] == 60_000
+    assert by_code["NV001"]["pending_amount"] == 0
+    assert by_code["NV001"]["can_approve"] is False
+
+    assert by_code["NV002"]["has_sessions"] is False
+    assert by_code["NV002"]["pending_reason"] is None
+    assert by_code["NV002"]["pending_reasons"] == []
+    assert by_code["NV002"]["blocked_amount"] == 0
+
+
+@pytest.mark.unit
+async def test_history_day_includes_blocked_amount_and_session_flag_source(session):
+    employee = await make_employee(session)
+    row = await closed_session(session, employee, dt(7, 0), dt(10, 0), flags=["gps_out_of_range"])
+    row.check_in_distance_m = Decimal("9")
+    row.check_out_distance_m = Decimal("230")
+    await session.flush()
+
+    history = await HistoryService(session, FakeClock(dt(12))).history(employee, date(2026, 4, 24), date(2026, 4, 24))
+    assert history["days"][0]["blocked_amount"] == 90_000
+    payload = history["days"][0]["unpaid_sessions"][0]
+    assert payload["flag_source"] == "check_out"
+    assert payload["check_out_distance_m"] == 230.0
+
+
+@pytest.mark.unit
+async def test_session_dict_flag_source_check_out_distance(session):
+    employee = await make_employee(session)
+    row = await closed_session(session, employee, dt(7, 0), dt(8, 0), flags=["gps_out_of_range"])
+    row.check_in_distance_m = Decimal("9")
+    row.check_out_distance_m = Decimal("230")
+    payload = session_dict(row)
+    assert payload["flag_source"] == "check_out"
 
 
 @pytest.mark.unit

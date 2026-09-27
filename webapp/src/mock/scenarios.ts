@@ -32,6 +32,7 @@ export type MockScenario =
   | "manager_review_resolved"
   | "manager_already_handled"
   | "manager_payroll"
+  | "manager_payroll_real_phone"
   | "manager_payroll_a_detail"
   | "manager_session_edit"
   | "manager_payroll_confirm"
@@ -71,6 +72,7 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_review_resolved", label: "QL: Đã xử lý"},
   {key: "manager_already_handled", label: "QL: Đã xử lý bởi người khác"},
   {key: "manager_payroll", label: "QL: Duyệt lương"},
+  {key: "manager_payroll_real_phone", label: "QL: Dữ liệu thật GPS"},
   {key: "manager_payroll_a_detail", label: "QL: Chi tiết lương A"},
   {key: "manager_session_edit", label: "QL: Sửa phiên"},
   {key: "manager_payroll_confirm", label: "QL: Hộp xác nhận"},
@@ -235,8 +237,11 @@ export const mockHistory: History = {
     {
       date: "2024-04-24",
       total_amount: 284000,
+      paid_amount: 162000,
+      pending_amount: 122000,
+      blocked_amount: 0,
       batches: [
-        {id: 1, batch_no: 1, amount: 162000, approved_at: "2024-04-24T12:00:00+07:00", sessions: [{...closedSession, output: [] as const, pay_batch_id: 1, pending_reason: null}]},
+        {id: 1, batch_no: 1, amount: 162000, approved_at: "2024-04-24T12:00:00+07:00", sessions: [{...closedSession, output: [] as const, pay_batch_id: 1, pending_reason: null, output_locked: true, output_locked_at: "2024-04-24T11:45:00+07:00"}]},
       ],
       unpaid_sessions: [
         {
@@ -248,6 +253,8 @@ export const mockHistory: History = {
           amount_raw: 122500,
           pay_batch_id: null,
           pending_reason: "cho_duyet",
+          output_locked: false,
+          output_locked_at: "2024-04-24T17:20:00+07:00",
           output: mockProducts.map((item) => ({code: item.code, name: item.name, bags: item.bags, kg: item.bags * item.kg_per_bag})),
         },
       ],
@@ -255,6 +262,9 @@ export const mockHistory: History = {
     {
       date: "2024-04-23",
       total_amount: 248000,
+      paid_amount: 248000,
+      pending_amount: 0,
+      blocked_amount: 0,
       batches: [
         {id: 2, batch_no: 1, amount: 248000, approved_at: "2024-04-23T18:00:00+07:00", sessions: []},
       ],
@@ -266,12 +276,12 @@ export const mockHistory: History = {
 export const mockWorkingNow: WorkingNowItem[] = [
   {session_id: 101, employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", check_in_at: "2024-04-24T06:12:00+07:00", minutes_worked: 208, flags: [], check_in_distance_m: 12, check_in_accuracy_m: 15, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
   {session_id: 201, employee_id: 2, code: "NV002", full_name: "Lê Thị B", check_in_at: "2024-04-24T07:55:00+07:00", minutes_worked: 125, flags: [], check_in_distance_m: 22, check_in_accuracy_m: 20, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
-  {session_id: 301, employee_id: 3, code: "NV003", full_name: "Trần Văn C", check_in_at: "2024-04-24T08:10:00+07:00", minutes_worked: 45, flags: ["gps_out_of_range"], check_in_distance_m: 150, check_in_accuracy_m: 35, is_outside: true, server_now: "2024-04-24T09:40:15+07:00"},
+  {session_id: 301, employee_id: 3, code: "NV003", full_name: "Trần Văn C", check_in_at: "2024-04-24T08:10:00+07:00", minutes_worked: 45, flags: ["gps_out_of_range"], flag_source: "check_in", check_in_distance_m: 150, check_in_accuracy_m: 35, is_outside: true, server_now: "2024-04-24T09:40:15+07:00"},
   {session_id: 401, employee_id: 4, code: "NV004", full_name: "Phạm Thị D", check_in_at: "2024-04-24T09:20:00+07:00", minutes_worked: 45, flags: [], check_in_distance_m: 14, check_in_accuracy_m: 18, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
 ];
 
 export const mockReviewPending: ReviewItem[] = [
-  {...closedSession, id: 501, employee_code: "NV001", employee_name: "Nguyễn Văn A", flags: ["gps_out_of_range"], check_in_distance_m: 250, check_in_accuracy_m: 35},
+  {...closedSession, id: 501, employee_code: "NV001", employee_name: "Nguyễn Văn A", flags: ["gps_out_of_range"], flag_source: "check_out", check_in_distance_m: 9, check_out_distance_m: 230, check_in_accuracy_m: 20, check_out_accuracy_m: 25},
   {...openSession, id: 502, employee_id: 2, employee_code: "NV002", employee_name: "Lê Thị B", status: "needs_review", review_reason: "forgot_checkout", check_in_at: "2024-04-24T08:05:00+07:00", check_out_at: null, minutes: null, amount_raw: null},
   {...openSession, id: 503, employee_id: 3, employee_code: "NV003", employee_name: "Trần Văn C", status: "needs_review", review_reason: "forgot_checkout", check_in_at: "2024-04-24T13:10:00+07:00", check_out_at: null, minutes: null, amount_raw: null},
 ];
@@ -282,10 +292,16 @@ export const mockReviewResolved: ReviewItem[] = [
 ];
 
 export const mockPayroll: PayrollSummary[] = [
-  {employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", work_date: "2024-04-24", hourly_rate: 30000, closed_minutes: 568, eligible_minutes: 245, eligible_session_ids: [103], paid_amount: 162000, day_total_rounded: 284000, pending_amount: 122000, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: true, needs_review_session_ids: [], pending_reason: "open_session"},
-  {employee_id: 2, code: "NV002", full_name: "Lê Thị B", work_date: "2024-04-24", hourly_rate: 28000, closed_minutes: 480, eligible_minutes: 480, eligible_session_ids: [202], paid_amount: 0, day_total_rounded: 224000, pending_amount: 224000, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: false, needs_review_session_ids: [], pending_reason: null},
-  {employee_id: 3, code: "NV003", full_name: "Trần Văn C", work_date: "2024-04-24", hourly_rate: 30000, closed_minutes: 420, eligible_minutes: 0, eligible_session_ids: [], paid_amount: 210000, day_total_rounded: 210000, pending_amount: 0, can_approve: false, unreviewed_flag_session_ids: [], has_open_session: false, needs_review_session_ids: [], pending_reason: null},
-  {employee_id: 4, code: "NV004", full_name: "Phạm Thị D", work_date: "2024-04-24", hourly_rate: 28000, closed_minutes: 360, eligible_minutes: 360, eligible_session_ids: [402], paid_amount: 0, day_total_rounded: 168000, pending_amount: 168000, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: false, needs_review_session_ids: [], pending_reason: null},
+  {employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", work_date: "2024-04-24", hourly_rate: 30000, closed_minutes: 568, eligible_minutes: 245, eligible_session_ids: [103], paid_amount: 162000, day_total_rounded: 284000, pending_amount: 122000, blocked_amount: 0, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: true, has_sessions: true, needs_review_session_ids: [], pending_reason: "open_session", pending_reasons: ["open_session"]},
+  {employee_id: 2, code: "NV002", full_name: "Lê Thị B", work_date: "2024-04-24", hourly_rate: 28000, closed_minutes: 480, eligible_minutes: 480, eligible_session_ids: [202], paid_amount: 0, day_total_rounded: 224000, pending_amount: 224000, blocked_amount: 0, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: false, has_sessions: true, needs_review_session_ids: [], pending_reason: null, pending_reasons: []},
+  {employee_id: 3, code: "NV003", full_name: "Trần Văn C", work_date: "2024-04-24", hourly_rate: 30000, closed_minutes: 420, eligible_minutes: 0, eligible_session_ids: [], paid_amount: 210000, day_total_rounded: 210000, pending_amount: 0, blocked_amount: 0, can_approve: false, unreviewed_flag_session_ids: [], has_open_session: false, has_sessions: true, needs_review_session_ids: [], pending_reason: null, pending_reasons: []},
+  {employee_id: 4, code: "NV004", full_name: "Phạm Thị D", work_date: "2024-04-24", hourly_rate: 28000, closed_minutes: 360, eligible_minutes: 360, eligible_session_ids: [402], paid_amount: 0, day_total_rounded: 168000, pending_amount: 168000, blocked_amount: 0, can_approve: true, unreviewed_flag_session_ids: [], has_open_session: false, has_sessions: true, needs_review_session_ids: [], pending_reason: null, pending_reasons: []},
+];
+
+export const mockPayrollRealPhone: PayrollSummary[] = [
+  {employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", work_date: "2024-04-24", hourly_rate: 30000, closed_minutes: 120, eligible_minutes: 0, eligible_session_ids: [], paid_amount: 0, day_total_rounded: 60000, pending_amount: 0, blocked_amount: 60000, can_approve: false, unreviewed_flag_session_ids: [801, 802], has_open_session: true, has_sessions: true, needs_review_session_ids: [], pending_reason: "unreviewed_gps", pending_reasons: ["unreviewed_gps", "open_session"]},
+  {employee_id: 2, code: "NV002", full_name: "Lê Thị B", work_date: "2024-04-24", hourly_rate: 28000, closed_minutes: 0, eligible_minutes: 0, eligible_session_ids: [], paid_amount: 0, day_total_rounded: 0, pending_amount: 0, blocked_amount: 0, can_approve: false, unreviewed_flag_session_ids: [], has_open_session: false, has_sessions: false, needs_review_session_ids: [], pending_reason: null, pending_reasons: []},
+  ...mockPayroll.filter((row) => row.employee_id !== 1 && row.employee_id !== 2),
 ];
 
 export const mockPayrollADetail: PayrollDetail = {

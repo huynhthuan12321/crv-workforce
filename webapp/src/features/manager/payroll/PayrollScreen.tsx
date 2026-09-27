@@ -3,10 +3,34 @@ import {ApiError, api} from "../../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../components/ui";
 import {fmtDateLong, fmtTime, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
+import {gpsLabel} from "../../../lib/gps-label";
 import {hapticNotify} from "../../../lib/haptic";
 import type {PayrollApproveResult, PayrollDetail, PayrollSession, PayrollSummary} from "../../../types/api";
 import {errorText, pendingText, sessionTime, useBackButton} from "../shared";
-export function PayrollScreen() {
+
+function payrollDone(row: PayrollSummary) {
+  return row.paid_amount > 0
+    && row.pending_amount === 0
+    && row.blocked_amount === 0
+    && row.needs_review_session_ids.length === 0;
+}
+
+export function payrollStatusText(row: PayrollSummary): string {
+  if (!row.has_sessions) return "Chưa có phiên";
+  if (row.can_approve) return "Có thể duyệt";
+  if (row.blocked_amount > 0) return "Cần xử lý GPS";
+  if (payrollDone(row)) return "Đã trả hết";
+  return "Chưa đủ điều kiện";
+}
+
+function comparePayrollRows(a: PayrollSummary, b: PayrollSummary) {
+  if (a.has_sessions !== b.has_sessions) return a.has_sessions ? -1 : 1;
+  if (a.can_approve !== b.can_approve) return a.can_approve ? -1 : 1;
+  if (a.blocked_amount !== b.blocked_amount) return b.blocked_amount - a.blocked_amount;
+  return a.full_name.localeCompare(b.full_name, "vi");
+}
+
+export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} = {}) {
   const [date, setDate] = useState(todayVN());
   const [rows, setRows] = useState<PayrollSummary[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>(
@@ -34,10 +58,11 @@ export function PayrollScreen() {
     }
   }, [date]);
   useEffect(() => void load(), [load]);
-  const approvableIds = rows.filter((row) => row.can_approve).map((row) => row.employee_id);
+  const sortedRows = [...rows].sort(comparePayrollRows);
+  const approvableIds = sortedRows.filter((row) => row.can_approve).map((row) => row.employee_id);
   const allSelected = approvableIds.length > 0 && approvableIds.every((id) => selectedIds.includes(id));
   const toggleAll = () => setSelectedIds(allSelected ? [] : approvableIds);
-  const selected = rows.filter((row) => selectedIds.includes(row.employee_id));
+  const selected = sortedRows.filter((row) => selectedIds.includes(row.employee_id));
   const totals = selected.reduce((acc, row) => ({minutes: acc.minutes + row.eligible_minutes, amount: acc.amount + row.pending_amount}), {minutes: 0, amount: 0});
   const approve = async () => {
     setBusy(true);
@@ -78,7 +103,7 @@ export function PayrollScreen() {
           <span>Chọn tất cả dòng đủ điều kiện duyệt ({approvableIds.length})</span>
         </label>
       )}
-      {rows.map((row) => {
+      {sortedRows.map((row) => {
         const checked = selectedIds.includes(row.employee_id);
         return (
           <Card key={row.employee_id} className="manager-card clickable-card" onClick={() => setDetailId(row.employee_id)}>
@@ -87,7 +112,9 @@ export function PayrollScreen() {
                 <b>{row.full_name}</b>
                 <small>{row.code} · Đơn giá {fmtMoney(row.hourly_rate ?? 0)}/giờ</small>
               </div>
-              {row.can_approve ? (
+              {payrollStatusText(row) === "Chưa có phiên" ? (
+                <Chip tone="neutral">Chưa có phiên</Chip>
+              ) : payrollStatusText(row) === "Có thể duyệt" ? (
                 <input
                   aria-label={`Chọn ${row.full_name}`}
                   type="checkbox"
@@ -95,13 +122,25 @@ export function PayrollScreen() {
                   onClick={(event) => event.stopPropagation()}
                   onChange={() => setSelectedIds((ids) => checked ? ids.filter((id) => id !== row.employee_id) : [...ids, row.employee_id])}
                 />
-              ) : <Chip tone="success">Đã trả hết</Chip>}
+              ) : payrollStatusText(row) === "Cần xử lý GPS" ? (
+                <div className="inline-actions">
+                  <Chip tone="warning">Cần xử lý GPS · {fmtMoney(row.blocked_amount)}</Chip>
+                  <Button tone="secondary" onClick={(event) => { event.stopPropagation(); onOpenReviewGps?.(); }}>Xem</Button>
+                </div>
+              ) : payrollStatusText(row) === "Đã trả hết" ? (
+                <Chip tone="success">Đã trả hết</Chip>
+              ) : (
+                <Chip tone="neutral">Chưa đủ điều kiện</Chip>
+              )}
             </div>
             <div className="mini-grid">
-              <Metric label="Chờ duyệt" value={fmtMoney(row.pending_amount)} tone={row.pending_amount ? "warning" : "success"} />
+              <Metric label="Chờ duyệt" value={fmtMoney(row.pending_amount)} tone={row.pending_amount ? "warning" : "neutral"} />
+              <Metric label="Cần xử lý GPS" value={fmtMoney(row.blocked_amount)} tone={row.blocked_amount ? "warning" : "neutral"} />
               <Metric label="Đã trả hôm nay" value={fmtMoney(row.paid_amount)} />
             </div>
-            <p className="muted">{pendingText(row.pending_reason)}</p>
+            {row.pending_reasons.filter((reason) => reason !== "open_session").map((reason) => <p key={reason} className="muted">{pendingText(reason as PayrollSummary["pending_reason"])}</p>)}
+            {row.has_open_session && <p className="muted">Có phiên đang mở, sẽ vào đợt sau.</p>}
+            {!row.has_sessions && <p className="muted">Nhân viên chưa có phiên làm trong ngày này.</p>}
           </Card>
         );
       })}
@@ -204,7 +243,7 @@ function PayrollDetailScreen({employeeId, date, onBack}: {employeeId: number; da
 function SessionLine({row, action}: {row: PayrollSession; action?: ReactNode}) {
   return (
     <div className="session-row">
-      <div><b>{sessionTime(row)}</b><small>{row.flags.includes("gps_out_of_range") ? "Ngoài xưởng" : "GPS bình thường"}</small></div>
+      <div><b>{sessionTime(row)}</b><small>{gpsLabel(row)}</small></div>
       {action || (row.is_locked ? <Chip tone="success">Đã khóa</Chip> : <Chip tone="warning">Chờ duyệt</Chip>)}
     </div>
   );

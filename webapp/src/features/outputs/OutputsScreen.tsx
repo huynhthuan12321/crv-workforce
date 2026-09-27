@@ -1,17 +1,25 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {api} from "../../api/client";
 import {Button, Card, Chip, ScreenState, SectionTitle} from "../../components/ui";
-import {fmtCountdown, fmtTime} from "../../lib/date-vn";
+import {fmtCountdown, fmtDate, fmtTime, todayVN} from "../../lib/date-vn";
 import {fmtKg, totalKg} from "../../lib/format";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
 import {serverNow, syncServerClock} from "../../lib/server-clock";
 import type {History, HistorySession, OutputForm, OutputSubmit} from "../../types/api";
 
-function eligibleSessions(history: History): HistorySession[] {
-  return history.days.flatMap((day) => [
+export function eligibleSessions(history: History): HistorySession[] {
+  const closed = history.days.flatMap((day) => [
     ...day.unpaid_sessions,
     ...day.batches.flatMap((batch) => batch.sessions),
-  ]).filter((session) => session.status === "closed" && Boolean(session.check_out_at));
+  ]).filter((session) => session.status === "closed" && Boolean(session.check_out_at))
+    .sort((a, b) => new Date(b.check_out_at ?? b.check_in_at).getTime() - new Date(a.check_out_at ?? a.check_in_at).getTime());
+  const editable = closed.filter((session) => !session.output_locked);
+  return editable.length ? editable : closed.slice(0, 1);
+}
+
+export function sessionLabel(session: HistorySession, today: string): string {
+  const day = todayVN(new Date(session.check_in_at)) === today ? "Hôm nay" : fmtDate(session.check_in_at);
+  return `${day} · ${fmtTime(session.check_in_at)}–${fmtTime(session.check_out_at)}`;
 }
 
 export function OutputsScreen({recentSessionId}: {recentSessionId: number | null}) {
@@ -100,8 +108,8 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
           <div className="session-picker">
             {sessions.map((session) => (
               <button key={session.id} type="button" className={selected === session.id ? "active" : ""} onClick={() => setSelected(session.id)}>
-                <b>Phiên #{session.id}</b>
-                <span>{fmtTime(session.check_in_at)}–{fmtTime(session.check_out_at)}</span>
+                <b>{sessionLabel(session, history.to)}</b>
+                <span>{session.output_locked ? "Đã khóa · xem chi tiết ở Lịch sử" : "Còn sửa sản lượng"}</span>
               </button>
             ))}
           </div>
@@ -112,7 +120,7 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
         <Card>
           <div className="output-heading">
             <SectionTitle
-              title={`Phiên #${form.session_id}`}
+              title={sessions.find((session) => session.id === form.session_id) ? sessionLabel(sessions.find((session) => session.id === form.session_id)!, history.to) : "Phiên vừa ra ca"}
               eyebrow={locked ? "Đã khóa chỉnh sửa" : `Còn ${fmtCountdown(secondsRemaining)} để chỉnh sửa`}
             />
             <Chip tone={locked ? "danger" : "success"}>{locked ? "Đã khóa" : "Đang mở"}</Chip>
