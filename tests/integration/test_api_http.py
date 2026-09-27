@@ -26,6 +26,7 @@ from source.database.models import (
     RateHistoryOrm,
     WorkSessionOrm,
     NotificationOutboxOrm,
+    AuditLogOrm,
 )
 from source.enums import EmployeeRole, SessionStatus
 from source.services.rate_limit import attendance_rate_limiter
@@ -390,3 +391,126 @@ async def test_history_grouped_by_day_shows_batch_money_and_output(api_client, p
     day = response.json()["data"]["days"][0]
     assert day["batches"][0]["amount"] == 30000
     assert day["batches"][0]["sessions"][0]["output"][0]["bags"] == 5
+
+
+async def test_gd7c_manager_api_fields_and_filters(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await seed_actor(session, "NV007", EmployeeRole.employee, 7001)
+            manager = await seed_actor(session, "QL007", EmployeeRole.manager, 7002)
+            await seed_rate(session, employee.id, 30_000)
+            flagged = work_session(employee.id, flags=["gps_out_of_range"])
+            flagged.check_in_accuracy_m = Decimal("35")
+            flagged.check_in_distance_m = Decimal("150")
+            forgotten = work_session(employee.id, status=SessionStatus.needs_review, check_out=None)
+            forgotten.review_reason = "forgot_checkout"
+            open_row = work_session(employee.id, status=SessionStatus.open, check_in=NOW.replace(hour=9), check_out=None)
+            open_row.check_in_distance_m = Decimal("150")
+            open_row.check_in_accuracy_m = Decimal("40")
+            open_row.flags = ["gps_out_of_range"]
+            session.add_all([flagged, forgotten, open_row])
+            await session.flush()
+            employee_id, manager_id = employee.id, manager.id
+            flagged_id = flagged.id
+            forgotten_id = forgotten.id
+
+    headers = auth_headers(manager_id)
+
+    response = api_client.get("/api/review/pending?type=gps", headers=headers)
+    assert response.status_code == 200, response.text
+    gps = response.json()["data"]
+    assert len(gps) == 1
+    assert gps[0]["employee_code"] == "NV007"
+    assert gps[0]["employee_name"] == "NV007"
+    assert gps[0]["check_in_accuracy_m"] is not None
+    assert gps[0]["check_in_distance_m"] is not None
+
+    response = api_client.get("/api/review/pending?type=forgot", headers=headers)
+    assert response.status_code == 200, response.text
+    forgot = response.json()["data"]
+    assert [item["id"] for item in forgot] == [forgotten_id]
+    assert forgot[0]["review_reason"] == "forgot_checkout"
+
+    response = api_client.post(f"/api/review/{flagged_id}/flags-reviewed", headers=headers)
+    assert response.status_code == 200, response.text
+    response = api_client.post(f"/api/review/{flagged_id}/flags-reviewed", headers=headers)
+    assert response.status_code == 409
+    assert response.json()["details"]["handled_by_name"] == "QL007"
+    assert response.json()["details"]["action"] == "flags_reviewed"
+
+    response = api_client.get("/api/review/resolved?type=gps", headers=headers)
+    assert response.status_code == 200, response.text
+    resolved = response.json()["data"][0]
+    assert resolved["resolved_by_name"] == "QL007"
+    assert resolved["resolved_at"].endswith("+07:00")
+    assert resolved["resolved_action"] == "flags_reviewed"
+
+    response = api_client.get("/api/working-now", headers=headers)
+    assert response.status_code == 200, response.text
+    working = response.json()["data"][0]
+    assert working["check_in_distance_m"] == 150.0
+    assert working["check_in_accuracy_m"] == 40.0
+    assert working["is_outside"] is True
+
+    response = api_client.get(f"/api/payroll?date={NOW.date()}", headers=headers)
+    assert response.status_code == 200, response.text
+    payroll = response.json()["data"][0]
+    assert payroll["hourly_rate"] == 30000
+    assert payroll["has_open_session"] is True
+    assert payroll["needs_review_session_ids"] == [forgotten_id]
+    assert payroll["pending_reason"] == "open_session"
+
+    response = api_client.get(f"/api/payroll/{employee_id}?date={NOW.date()}", headers=headers)
+    assert response.status_code == 200, response.text
+    detail = response.json()["data"]
+    assert "is_locked" in detail["sessions"][0]
+
+    response = api_client.get("/api/employees?q=NV007&active=true", headers=headers)
+    assert response.status_code == 200, response.text
+    managed = response.json()["data"][0]
+    assert managed["current_hourly_rate"] == 30000
+    assert managed["is_linked"] is True
+    assert managed["has_open_session"] is True
+
+
+async def test_gd7c_employee_admin_errors_audit_and_rate_conflict(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QL008", EmployeeRole.manager, 8001)
+            employee = await seed_actor(session, "NV008", EmployeeRole.employee, None)
+            await seed_rate(session, employee.id, 28_000)
+            employee_id, manager_id = employee.id, manager.id
+
+    headers = auth_headers(manager_id)
+
+    response = api_client.post("/api/employees/999999/lock", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["code"] == "EMPLOYEE_NOT_FOUND"
+
+    response = api_client.post(f"/api/employees/{manager_id}/lock", headers=headers)
+    assert response.status_code == 403
+    assert response.json()["code"] == "FORBIDDEN"
+
+    response = api_client.post(
+        f"/api/employees/{employee_id}/rates",
+        json={"hourly_rate": 29_000, "effective_from": str(NOW.date())},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "RATE_DATE_EXISTS"
+
+    response = api_client.post(f"/api/employees/{employee_id}/lock", headers=headers)
+    assert response.status_code == 200, response.text
+    response = api_client.post(f"/api/employees/{employee_id}/unlock", headers=headers)
+    assert response.status_code == 200, response.text
+    response = api_client.post(f"/api/employees/{employee_id}/invite", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["invite_url"]
+
+    async with pg_factory() as session:
+        actions = (await session.execute(
+            select(func.count()).select_from(AuditLogOrm).where(
+                AuditLogOrm.action.in_(["employee_locked", "employee_unlocked", "invite_regenerated"]),
+            ),
+        )).scalar_one()
+        assert actions == 3
