@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from source.config import settings
 from source.database.models import (
+    AuditLogOrm,
     ConsentTextOrm,
     EmployeeOrm,
     InviteCodeOrm,
@@ -133,8 +134,11 @@ async def reset_demo_data(session: AsyncSession) -> None:
     output_ids = select(OutputLogOrm.id).where(OutputLogOrm.work_session_id.in_(session_ids))
     await session.execute(delete(OutputItemOrm).where(OutputItemOrm.output_log_id.in_(output_ids)))
     await session.execute(delete(OutputLogOrm).where(OutputLogOrm.work_session_id.in_(session_ids)))
-    await session.execute(delete(PayBatchOrm).where(PayBatchOrm.employee_id.in_(demo_ids)))
+    # work_sessions.pay_batch_id -> pay_batches: xóa phiên TRƯỚC, rồi mới xóa đợt.
     await session.execute(delete(WorkSessionOrm).where(WorkSessionOrm.employee_id.in_(demo_ids)))
+    await session.execute(delete(PayBatchOrm).where(PayBatchOrm.employee_id.in_(demo_ids)))
+    # audit_logs.actor_id -> employees (không cascade): xóa nhật ký do nhân viên demo tạo.
+    await session.execute(delete(AuditLogOrm).where(AuditLogOrm.actor_id.in_(demo_ids)))
     await session.execute(delete(InviteCodeOrm).where(InviteCodeOrm.employee_id.in_(demo_ids)))
     await session.execute(delete(RateHistoryOrm).where(RateHistoryOrm.employee_id.in_(demo_ids)))
     await session.execute(delete(EmployeeOrm).where(EmployeeOrm.id.in_(demo_ids)))
