@@ -92,7 +92,7 @@ export function CrvApp() {
     return (
       <>
         <MockToolbarHost onChange={() => setMockRefresh((x) => x + 1)} />
-        <AccessScreen code={loginError.code} onRetry={login} />
+        <AccessScreen code={loginError.code} status={loginError.status} onRetry={login} />
       </>
     );
   }
