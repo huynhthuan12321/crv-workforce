@@ -923,7 +923,7 @@ class EmployeeService:
     def __init__(self, session: AsyncSession, clock: Clock | None = None):
         self.session, self.clock = session, clock or Clock()
 
-    async def list(self, q: str | None = None, active: bool | None = None) -> list[dict]:
+    async def list_employees(self, q: str | None = None, active: bool | None = None) -> list[dict]:
         query = select(EmployeeOrm).where(EmployeeOrm.role == EmployeeRole.employee)
         if active is not None:
             query = query.where(EmployeeOrm.is_active.is_(active))

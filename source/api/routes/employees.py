@@ -32,7 +32,7 @@ async def employees(
     _: EmployeeOrm = Depends(manager_only),
     session: AsyncSession = Depends(get_session),
 ):
-    return {"data": await EmployeeService(session).list(q=q, active=active)}
+    return {"data": await EmployeeService(session).list_employees(q=q, active=active)}
 
 
 @router.post("")
