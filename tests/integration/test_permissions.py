@@ -54,6 +54,8 @@ async def clear_rate_limit_state() -> None:
 async def pg_factory():
     url = os.getenv("TEST_DATABASE_URL")
     if not url:
+        if os.getenv("CRV_REQUIRE_POSTGRES") == "1":
+            pytest.fail("CRV_REQUIRE_POSTGRES=1 but TEST_DATABASE_URL is not set")
         pytest.skip("TEST_DATABASE_URL is not set")
     engine = create_async_engine(url, pool_pre_ping=True, poolclass=NullPool)
     async with engine.begin() as conn:
