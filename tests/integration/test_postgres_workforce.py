@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -22,9 +22,11 @@ pytestmark = pytest.mark.postgres
 
 
 def dt(hour: int, minute: int = 0):
-    from datetime import datetime
-
     return datetime(2026, 4, 24, hour, minute, tzinfo=VIETNAM_TZ)
+
+
+def real_phone_dt(hour: int, minute: int = 0):
+    return datetime(2026, 9, 27, hour, minute, tzinfo=VIETNAM_TZ)
 
 
 @pytest.fixture()
@@ -136,6 +138,76 @@ async def test_concurrent_close_forgotten(pg_factory):
     results = await asyncio.gather(close_once(), close_once())
     assert sum(isinstance(item, WorkSessionOrm) for item in results) == 1
     assert results.count("ALREADY_HANDLED") == 1
+
+
+async def test_forgotten_close_rejects_future_and_overlap_on_postgres(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            first = session_row(employee.id, SessionStatus.needs_review, check_in=real_phone_dt(9, 59))
+            first.review_reason = "forgot_checkout"
+            second = session_row(employee.id, SessionStatus.needs_review, check_in=real_phone_dt(17, 49))
+            second.review_reason = "forgot_checkout"
+            open_row = session_row(employee.id, SessionStatus.open, check_in=real_phone_dt(19, 21))
+            session.add_all([first, second, open_row])
+            await session.flush()
+            manager_id, first_id, second_id = manager.id, first.id, second.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            actor = await session.get(EmployeeOrm, manager_id)
+            service = ReviewService(session, FakeClock(real_phone_dt(19, 24)))
+            with pytest.raises(WorkforceError) as exc:
+                await service.close_forgotten(actor, first_id, real_phone_dt(20, 0), "quên bấm ra ca")
+            assert exc.value.code == "CHECKOUT_IN_FUTURE"
+            assert exc.value.status_code == 422
+            assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
+
+    async with pg_factory() as session:
+        async with session.begin():
+            actor = await session.get(EmployeeOrm, manager_id)
+            service = ReviewService(session, FakeClock(real_phone_dt(19, 24)))
+            with pytest.raises(WorkforceError) as exc:
+                await service.close_forgotten(actor, first_id, real_phone_dt(18, 0), "quên bấm ra ca")
+            assert exc.value.code == "SESSION_OVERLAP"
+            assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
+
+            bounds = await service.checkout_bounds(second_id)
+            assert bounds["max_check_out"] == "2026-09-27T19:21:00+07:00"
+
+            with pytest.raises(WorkforceError) as exc:
+                await service.close_forgotten(actor, second_id, real_phone_dt(19, 22), "quên bấm ra ca")
+            assert exc.value.code == "SESSION_OVERLAP"
+            assert exc.value.details["max_check_out"] == "2026-09-27T19:21:00+07:00"
+            assert exc.value.details["overlap"]["check_out_at"] is None
+
+
+async def test_edit_session_rejects_future_and_overlap_on_postgres(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            editable = session_row(employee.id, SessionStatus.closed, check_in=real_phone_dt(9, 59), check_out=real_phone_dt(10, 10))
+            next_row = session_row(employee.id, SessionStatus.needs_review, check_in=real_phone_dt(17, 49))
+            next_row.review_reason = "forgot_checkout"
+            session.add_all([editable, next_row])
+            await session.flush()
+            manager_id, editable_id = manager.id, editable.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            actor = await session.get(EmployeeOrm, manager_id)
+            service = ReviewService(session, FakeClock(real_phone_dt(19, 24)))
+            with pytest.raises(WorkforceError) as exc:
+                await service.edit_session(actor, editable_id, real_phone_dt(9, 59), real_phone_dt(20, 0), "sửa theo sổ giấy")
+            assert exc.value.code == "CHECKOUT_IN_FUTURE"
+            assert exc.value.status_code == 422
+
+            with pytest.raises(WorkforceError) as exc:
+                await service.edit_session(actor, editable_id, real_phone_dt(9, 59), real_phone_dt(18, 0), "sửa theo sổ giấy")
+            assert exc.value.code == "SESSION_OVERLAP"
+            assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
 
 
 async def test_bot_advisory_lock_autocommit_idle(pg_factory):

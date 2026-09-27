@@ -4,7 +4,7 @@ import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../co
 import {fmtDate, fmtDateLong, fmtTime} from "../../../lib/date-vn";
 import {gpsLabel} from "../../../lib/gps-label";
 import {hapticImpact, hapticNotify} from "../../../lib/haptic";
-import type {ReviewItem} from "../../../types/api";
+import type {CheckoutBounds, ReviewItem, WorkSession} from "../../../types/api";
 import {errorText, reviewType, sessionTime, useBackButton} from "../shared";
 
 export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "gps" | "forgot"} = {}) {
@@ -18,6 +18,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReviewItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const scenario = new URLSearchParams(window.location.search).get("scenario");
   useBackButton(Boolean(selected), () => setSelected(null));
 
   const load = useCallback(async () => {
@@ -39,6 +40,12 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
 
   useEffect(() => void load(), [load]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
+  useEffect(() => {
+    if (scenario === "manager_review_close" && !selected) {
+      const forgot = pending.find((row) => reviewType(row) === "forgot");
+      if (forgot) setSelected(forgot);
+    }
+  }, [pending, scenario, selected]);
 
   const markFlags = async (row: ReviewItem) => {
     hapticImpact();
@@ -113,13 +120,22 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
 }
 
 function CloseForgottenScreen({row, onBack, onDone}: {row: ReviewItem; onBack: () => void; onDone: () => void}) {
-  const [time, setTime] = useState("20:00");
+  const [time, setTime] = useState("");
   const [reason, setReason] = useState("");
+  const [bounds, setBounds] = useState<CheckoutBounds | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const checkOutIso = `${row.work_date}T${time}:00+07:00`;
-  const minutes = Math.max(0, Math.floor((new Date(checkOutIso).getTime() - new Date(row.check_in_at).getTime()) / 60000));
-  const invalid = minutes <= 0 || reason.trim().length < 5;
+  const checkOutIso = time ? `${row.work_date}T${time}:00+07:00` : "";
+  const minutes = time ? Math.max(0, Math.floor((new Date(checkOutIso).getTime() - new Date(row.check_in_at).getTime()) / 60000)) : 0;
+  const invalid = !time || minutes <= 0 || reason.trim().length < 5;
+
+  useEffect(() => {
+    let active = true;
+    api.get<CheckoutBounds>(`/review/${row.id}/checkout-bounds`)
+      .then((data) => { if (active) setBounds(data); })
+      .catch((err) => { if (active) setError(checkoutErrorText(err)); });
+    return () => { active = false; };
+  }, [row.id]);
 
   const submit = async () => {
     setBusy(true);
@@ -130,7 +146,7 @@ function CloseForgottenScreen({row, onBack, onDone}: {row: ReviewItem; onBack: (
       onDone();
     } catch (err) {
       hapticNotify("error");
-      setError(errorText(err));
+      setError(checkoutErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -142,9 +158,18 @@ function CloseForgottenScreen({row, onBack, onDone}: {row: ReviewItem; onBack: (
       <Card>
         <SectionTitle eyebrow="Quên ra ca" title={row.employee_name} />
         <p className="muted">Vào ca {fmtTime(row.check_in_at)} · {fmtDateLong(row.check_in_at)}</p>
+        {bounds && <SameDaySessions sessions={bounds.sessions} />}
         <label className="form-field">
           Giờ ra
-          <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+          <input
+            type="time"
+            required
+            min={bounds ? fmtTime(bounds.min_check_out) : undefined}
+            max={bounds ? fmtTime(bounds.max_check_out) : undefined}
+            value={time}
+            onChange={(event) => setTime(event.target.value)}
+          />
+          {bounds && <small>Chọn từ {fmtTime(bounds.min_check_out)} đến {fmtTime(bounds.max_check_out)}. Không chọn giờ tương lai hoặc chồng phiên khác.</small>}
         </label>
         <Metric label="Thời lượng tự tính" value={`${minutes} phút`} tone={minutes > 0 ? "success" : "warning"} />
         <label className="form-field">
@@ -159,3 +184,36 @@ function CloseForgottenScreen({row, onBack, onDone}: {row: ReviewItem; onBack: (
   );
 }
 
+function SameDaySessions({sessions}: {sessions: WorkSession[]}) {
+  if (sessions.length === 0) return <p className="muted">Không có phiên khác trong ngày.</p>;
+  return (
+    <div className="session-list">
+      <b>Phiên khác cùng ngày</b>
+      {sessions.map((session) => (
+        <div className="session-row" key={session.id}>
+          <span>{fmtDate(session.check_in_at)} · {fmtTime(session.check_in_at)}–{session.check_out_at ? fmtTime(session.check_out_at) : "đang mở"}</span>
+          <Chip tone={session.status === "open" ? "warning" : "neutral"}>{session.status === "open" ? "Đang mở" : session.status === "needs_review" ? "Cần xử lý" : "Đã đóng"}</Chip>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function checkoutErrorText(error: unknown) {
+  if (error instanceof ApiError) {
+    const max = typeof error.details?.max_check_out === "string" ? fmtTime(error.details.max_check_out) : null;
+    const overlap = typeof error.details?.overlap === "object" && error.details?.overlap
+      ? error.details.overlap as {check_in_at?: string; check_out_at?: string | null}
+      : null;
+    if (error.code === "CHECKOUT_IN_FUTURE") {
+      return `Giờ ra không được ở tương lai${max ? `. Muộn nhất có thể chọn ${max}` : ""}.`;
+    }
+    if (error.code === "SESSION_OVERLAP") {
+      const overlapText = overlap?.check_in_at
+        ? ` Phiên bị chồng: ${fmtTime(overlap.check_in_at)}–${overlap.check_out_at ? fmtTime(overlap.check_out_at) : "đang mở"}.`
+        : "";
+      return `Giờ ra bị chồng với phiên khác${max ? `. Muộn nhất có thể chọn ${max}` : ""}.${overlapText}`;
+    }
+  }
+  return errorText(error);
+}

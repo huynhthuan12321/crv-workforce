@@ -5,7 +5,7 @@ import {fmtDateLong, fmtTime, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
 import {gpsLabel} from "../../../lib/gps-label";
 import {hapticNotify} from "../../../lib/haptic";
-import type {PayrollApproveResult, PayrollDetail, PayrollSession, PayrollSummary} from "../../../types/api";
+import type {CheckoutBounds, PayrollApproveResult, PayrollDetail, PayrollSession, PayrollSummary, WorkSession} from "../../../types/api";
 import {errorText, pendingText, sessionTime, useBackButton} from "../shared";
 
 function payrollDone(row: PayrollSummary) {
@@ -252,11 +252,19 @@ function EditSessionScreen({row, onBack, onDone}: {row: PayrollSession; onBack: 
   const [start, setStart] = useState(fmtTime(row.check_in_at));
   const [end, setEnd] = useState(fmtTime(row.check_out_at));
   const [reason, setReason] = useState("");
+  const [bounds, setBounds] = useState<CheckoutBounds | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const startIso = `${row.work_date}T${start}:00+07:00`;
   const endIso = `${row.work_date}T${end}:00+07:00`;
   const minutes = Math.max(0, Math.floor((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000));
+  useEffect(() => {
+    let active = true;
+    api.get<CheckoutBounds>(`/review/${row.id}/checkout-bounds`)
+      .then((data) => { if (active) setBounds(data); })
+      .catch((err) => { if (active) setError(checkoutErrorText(err)); });
+    return () => { active = false; };
+  }, [row.id]);
   const submit = async () => {
     setBusy(true);
     setError(null);
@@ -266,7 +274,7 @@ function EditSessionScreen({row, onBack, onDone}: {row: PayrollSession; onBack: 
       onDone();
     } catch (err) {
       hapticNotify("error");
-      setError(errorText(err));
+      setError(checkoutErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -278,8 +286,10 @@ function EditSessionScreen({row, onBack, onDone}: {row: PayrollSession; onBack: 
         <SectionTitle eyebrow="Sửa phiên" title={fmtDateLong(row.check_in_at)} />
         <div className="two-col">
           <label className="form-field">Giờ vào<input type="time" value={start} onChange={(event) => setStart(event.target.value)} /></label>
-          <label className="form-field">Giờ ra<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
+          <label className="form-field">Giờ ra<input type="time" min={bounds ? fmtTime(bounds.min_check_out) : undefined} max={bounds ? fmtTime(bounds.max_check_out) : undefined} value={end} onChange={(event) => setEnd(event.target.value)} /></label>
         </div>
+        {bounds && <p className="muted">Giờ ra hợp lệ từ {fmtTime(bounds.min_check_out)} đến {fmtTime(bounds.max_check_out)}.</p>}
+        {bounds && <SameDaySessions sessions={bounds.sessions} />}
         <Metric label="Thời lượng tự tính" value={`${minutes} phút`} />
         <label className="form-field">Lý do điều chỉnh<textarea maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         {error && <p className="form-error">{error}</p>}
@@ -287,4 +297,38 @@ function EditSessionScreen({row, onBack, onDone}: {row: PayrollSession; onBack: 
       </Card>
     </div>
   );
+}
+
+function SameDaySessions({sessions}: {sessions: WorkSession[]}) {
+  if (sessions.length === 0) return <p className="muted">Không có phiên khác trong ngày.</p>;
+  return (
+    <div className="session-list">
+      <b>Phiên khác cùng ngày</b>
+      {sessions.map((session) => (
+        <div className="session-row" key={session.id}>
+          <span>{fmtTime(session.check_in_at)}–{session.check_out_at ? fmtTime(session.check_out_at) : "đang mở"}</span>
+          <Chip tone={session.status === "open" ? "warning" : "neutral"}>{session.status === "open" ? "Đang mở" : session.status === "needs_review" ? "Cần xử lý" : "Đã đóng"}</Chip>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function checkoutErrorText(error: unknown) {
+  if (error instanceof ApiError) {
+    const max = typeof error.details?.max_check_out === "string" ? fmtTime(error.details.max_check_out) : null;
+    const overlap = typeof error.details?.overlap === "object" && error.details?.overlap
+      ? error.details.overlap as {check_in_at?: string; check_out_at?: string | null}
+      : null;
+    if (error.code === "CHECKOUT_IN_FUTURE") {
+      return `Giờ ra không được ở tương lai${max ? `. Muộn nhất có thể chọn ${max}` : ""}.`;
+    }
+    if (error.code === "SESSION_OVERLAP") {
+      const overlapText = overlap?.check_in_at
+        ? ` Phiên bị chồng: ${fmtTime(overlap.check_in_at)}–${overlap.check_out_at ? fmtTime(overlap.check_out_at) : "đang mở"}.`
+        : "";
+      return `Giờ ra bị chồng với phiên khác${max ? `. Muộn nhất có thể chọn ${max}` : ""}.${overlapText}`;
+    }
+  }
+  return errorText(error);
 }

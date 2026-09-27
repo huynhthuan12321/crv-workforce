@@ -27,6 +27,7 @@ MESSAGES = {
     "NOT_OWNER": "Phiên làm việc không thuộc tài khoản này.",
     "ALREADY_HANDLED": "Mục này đã được xử lý.",
     "INVALID_CHECKOUT_TIME": "Giờ ra không hợp lệ.",
+    "CHECKOUT_IN_FUTURE": "Giờ ra không được ở tương lai.",
     "INVALID_DATETIME": "Thời gian phải có múi giờ.",
     "REASON_REQUIRED": "Vui lòng nhập lý do từ 5 đến 200 ký tự.",
     "SESSION_LOCKED_PAID": "Phiên đã thanh toán và bị khóa.",

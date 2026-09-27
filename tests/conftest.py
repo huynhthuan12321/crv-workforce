@@ -25,6 +25,7 @@ os.environ.setdefault("AUTH__SESSION_SECRET", "test-session-secret-change-me-32c
 os.environ.setdefault("WORKSHOP__LAT", "10.0")
 os.environ.setdefault("WORKSHOP__LNG", "106.0")
 os.environ.setdefault("WORKSHOP__RADIUS_M", "100")
+os.environ["RULES__CHECKIN_CUTOFF"] = "18:00"
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker

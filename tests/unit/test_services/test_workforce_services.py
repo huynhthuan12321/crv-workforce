@@ -307,6 +307,152 @@ async def test_review_close_edit_resolved_and_sweep(session):
 
 
 @pytest.mark.unit
+async def test_closed_forgotten_session_moves_from_pending_to_resolved(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    forgotten = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 4, 24),
+        check_in_at=dt(8, 0),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    session.add(forgotten)
+    await session.flush()
+
+    await ReviewService(session, FakeClock(dt(19, 24))).close_forgotten(manager, forgotten.id, dt(17, 0), "quên bấm ra ca")
+
+    pending = await ReviewService(session).pending("forgot")
+    resolved = await ReviewService(session).list_resolved("forgot")
+    assert [row["id"] for row in pending] == []
+    assert [row["id"] for row in resolved] == [forgotten.id]
+
+
+@pytest.mark.unit
+async def test_close_forgotten_rejects_future_and_overlap_with_max_checkout_details(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    first = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 9, 27),
+        check_in_at=datetime(2026, 9, 27, 9, 59, tzinfo=VIETNAM_TZ),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    second = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 9, 27),
+        check_in_at=datetime(2026, 9, 27, 17, 49, tzinfo=VIETNAM_TZ),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    open_row = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 9, 27),
+        check_in_at=datetime(2026, 9, 27, 19, 21, tzinfo=VIETNAM_TZ),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.open,
+        flags=[],
+    )
+    session.add_all([first, second, open_row])
+    await session.flush()
+    service = ReviewService(session, FakeClock(datetime(2026, 9, 27, 19, 24, tzinfo=VIETNAM_TZ)))
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.close_forgotten(manager, first.id, datetime(2026, 9, 27, 20, 0, tzinfo=VIETNAM_TZ), "quên bấm ra ca")
+    assert_code(exc, "CHECKOUT_IN_FUTURE")
+    assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.close_forgotten(manager, first.id, datetime(2026, 9, 27, 18, 0, tzinfo=VIETNAM_TZ), "quên bấm ra ca")
+    assert_code(exc, "SESSION_OVERLAP")
+    assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
+    assert exc.value.details["overlap"]["id"] == second.id
+
+    bounds = await service.checkout_bounds(second.id)
+    assert bounds["max_check_out"] == "2026-09-27T19:21:00+07:00"
+    assert [row["id"] for row in bounds["sessions"]] == [first.id, open_row.id]
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.close_forgotten(manager, second.id, datetime(2026, 9, 27, 19, 22, tzinfo=VIETNAM_TZ), "quên bấm ra ca")
+    assert_code(exc, "SESSION_OVERLAP")
+    assert exc.value.details["max_check_out"] == "2026-09-27T19:21:00+07:00"
+    assert exc.value.details["overlap"]["id"] == open_row.id
+    assert exc.value.details["overlap"]["check_out_at"] is None
+
+
+@pytest.mark.unit
+async def test_edit_session_rejects_future_and_overlap_like_close_forgotten(session):
+    employee = await make_employee(session)
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    editable = await closed_session(
+        session,
+        employee,
+        datetime(2026, 9, 27, 9, 59, tzinfo=VIETNAM_TZ),
+        datetime(2026, 9, 27, 10, 10, tzinfo=VIETNAM_TZ),
+    )
+    next_row = WorkSessionOrm(
+        employee_id=employee.id,
+        work_date=date(2026, 9, 27),
+        check_in_at=datetime(2026, 9, 27, 17, 49, tzinfo=VIETNAM_TZ),
+        check_in_lat=Decimal("10"),
+        check_in_lng=Decimal("106"),
+        check_in_accuracy_m=Decimal("10"),
+        check_in_distance_m=Decimal("0"),
+        rate_snapshot=30_000,
+        status=SessionStatus.needs_review,
+        review_reason="forgot_checkout",
+        flags=[],
+    )
+    session.add(next_row)
+    await session.flush()
+    service = ReviewService(session, FakeClock(datetime(2026, 9, 27, 19, 24, tzinfo=VIETNAM_TZ)))
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.edit_session(
+            manager,
+            editable.id,
+            datetime(2026, 9, 27, 9, 59, tzinfo=VIETNAM_TZ),
+            datetime(2026, 9, 27, 20, 0, tzinfo=VIETNAM_TZ),
+            "sửa theo thực tế",
+        )
+    assert_code(exc, "CHECKOUT_IN_FUTURE")
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.edit_session(
+            manager,
+            editable.id,
+            datetime(2026, 9, 27, 9, 59, tzinfo=VIETNAM_TZ),
+            datetime(2026, 9, 27, 18, 0, tzinfo=VIETNAM_TZ),
+            "sửa theo thực tế",
+        )
+    assert_code(exc, "SESSION_OVERLAP")
+    assert exc.value.details["max_check_out"] == "2026-09-27T17:49:00+07:00"
+
+
+@pytest.mark.unit
 async def test_escalate_1830(session):
     employee = await make_employee(session)
     other_employee = await make_employee(session, "NV002", "Nhân viên hôm qua")

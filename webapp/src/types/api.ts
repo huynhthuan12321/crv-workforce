@@ -157,6 +157,13 @@ export type ReviewItem = WorkSession & {
   reason?: string | null;
 };
 
+export type CheckoutBounds = {
+  session_id: number;
+  min_check_out: string;
+  max_check_out: string;
+  sessions: WorkSession[];
+};
+
 export type PayrollSummary = {
   employee_id: number;
   code: string;

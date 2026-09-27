@@ -98,7 +98,7 @@ def _flag_source(row: WorkSessionOrm) -> str | None:
 
 
 def _review_type(row: WorkSessionOrm) -> str | None:
-    if row.status == SessionStatus.needs_review or row.review_reason == "forgot_checkout":
+    if row.status == SessionStatus.needs_review:
         return "forgot"
     if _has_unreviewed_flags(row):
         return "gps"
@@ -479,6 +479,64 @@ class ReviewService:
             resolved.append(data)
         return resolved
 
+    def _checkout_details(self, min_check_out: datetime, max_check_out: datetime, overlap: WorkSessionOrm | None = None) -> dict:
+        details = {"min_check_out": iso_vn(min_check_out), "max_check_out": iso_vn(max_check_out)}
+        if overlap:
+            details["overlap"] = {
+                "id": overlap.id,
+                "status": overlap.status.value,
+                "check_in_at": iso_vn(overlap.check_in_at),
+                "check_out_at": iso_vn(overlap.check_out_at) if overlap.check_out_at else None,
+            }
+        return details
+
+    async def _checkout_context(self, row: WorkSessionOrm, check_in_vn: datetime) -> tuple[datetime, datetime, list[WorkSessionOrm]]:
+        now = _vn(self.clock.now())
+        min_check_out = check_in_vn + timedelta(minutes=1)
+        others = list((await self.session.scalars(select(WorkSessionOrm).where(
+            WorkSessionOrm.employee_id == row.employee_id,
+            WorkSessionOrm.work_date == check_in_vn.date(),
+            WorkSessionOrm.id != row.id,
+        ).order_by(WorkSessionOrm.check_in_at))).all())
+        next_starts = [_vn(other.check_in_at) for other in others if _vn(other.check_in_at) > check_in_vn]
+        max_check_out = min([now, *next_starts])
+        return min_check_out, max_check_out, others
+
+    def _overlapping_session(self, check_in_vn: datetime, check_out_vn: datetime, others: list[WorkSessionOrm]) -> WorkSessionOrm | None:
+        for other in others:
+            other_in = _vn(other.check_in_at)
+            other_out = _vn(other.check_out_at) if other.check_out_at else None
+            if other_out:
+                if check_in_vn < other_out and check_out_vn > other_in:
+                    return other
+            elif check_in_vn <= other_in < check_out_vn:
+                return other
+        return None
+
+    async def _validate_checkout_interval(self, row: WorkSessionOrm, check_in_vn: datetime, check_out_vn: datetime) -> None:
+        if check_out_vn <= check_in_vn or check_out_vn.date() != check_in_vn.date():
+            raise fail("INVALID_CHECKOUT_TIME", 422)
+        min_check_out, max_check_out, others = await self._checkout_context(row, check_in_vn)
+        details = self._checkout_details(min_check_out, max_check_out)
+        if check_out_vn > _vn(self.clock.now()):
+            raise fail("CHECKOUT_IN_FUTURE", 422, details=details)
+        overlap = self._overlapping_session(check_in_vn, check_out_vn, others)
+        if overlap:
+            raise fail("SESSION_OVERLAP", details=self._checkout_details(min_check_out, max_check_out, overlap))
+
+    async def checkout_bounds(self, session_id: int) -> dict:
+        row = await self.session.get(WorkSessionOrm, session_id)
+        if not row:
+            raise fail("ALREADY_HANDLED")
+        check_in_vn = _vn(row.check_in_at)
+        min_check_out, max_check_out, others = await self._checkout_context(row, check_in_vn)
+        return {
+            "session_id": row.id,
+            "min_check_out": iso_vn(min_check_out),
+            "max_check_out": iso_vn(max_check_out),
+            "sessions": [session_dict(other) for other in others],
+        }
+
     async def close_forgotten(self, actor: EmployeeOrm, session_id: int, check_out: datetime, reason: str) -> WorkSessionOrm:
         now = _vn(self.clock.now())
         check_out_vn = to_vn(check_out)
@@ -488,8 +546,9 @@ class ReviewService:
         if len(reason.strip()) < 5 or len(reason) > 200:
             raise fail("REASON_REQUIRED", 422)
         check_in_vn = _vn(row.check_in_at)
-        if check_out_vn <= check_in_vn or check_out_vn.date() != row.work_date:
+        if check_out_vn.date() != row.work_date:
             raise fail("INVALID_CHECKOUT_TIME", 422)
+        await self._validate_checkout_interval(row, check_in_vn, check_out_vn)
         row.check_out_at = check_out_vn
         _recalculate_session(row)
         row.status, row.closed_by = SessionStatus.closed, actor.id
@@ -533,18 +592,7 @@ class ReviewService:
             raise fail("INVALID_CHECKOUT_TIME", 422)
         if new_check_in_vn.date() != row.work_date:
             raise fail("INVALID_CHECKOUT_TIME", 422)
-
-        other_rows = (await self.session.scalars(select(WorkSessionOrm).where(
-            WorkSessionOrm.employee_id == row.employee_id,
-            WorkSessionOrm.work_date == row.work_date,
-            WorkSessionOrm.id != row.id,
-            WorkSessionOrm.status != SessionStatus.open,
-        ))).all()
-        for other in other_rows:
-            other_in = _vn(other.check_in_at)
-            other_out = _vn(other.check_out_at) if other.check_out_at else None
-            if other_out and new_check_in_vn < other_out and new_check_out_vn > other_in:
-                raise fail("SESSION_OVERLAP")
+        await self._validate_checkout_interval(row, new_check_in_vn, new_check_out_vn)
 
         old_value = {
             "check_in_at": row.check_in_at.isoformat(),

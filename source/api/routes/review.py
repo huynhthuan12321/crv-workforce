@@ -7,7 +7,7 @@ from source.api.dependencies import get_session
 from source.api.workforce_auth import manager_or_director
 from source.database.models import EmployeeOrm
 from source.domain.workforce_errors import WorkforceError
-from source.schemas.workforce import DataResponse, ReviewResolvedOut, ReviewSessionOut, WorkSessionOut
+from source.schemas.workforce import CheckoutBoundsOut, DataResponse, ReviewResolvedOut, ReviewSessionOut, WorkSessionOut
 from source.services.workforce import ReviewService, session_dict
 from source.utils.clock import to_vn
 
@@ -69,6 +69,11 @@ async def mark(session_id: int, actor: EmployeeOrm = Depends(manager_or_director
 async def close(session_id: int, body: CloseBody, actor: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
     row = await ReviewService(session).close_forgotten(actor, session_id, body.check_out_time, body.reason)
     return {"data": session_dict(row)}
+
+
+@router.get("/{session_id}/checkout-bounds", response_model=DataResponse[CheckoutBoundsOut])
+async def checkout_bounds(session_id: int, _: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
+    return {"data": await ReviewService(session).checkout_bounds(session_id)}
 
 
 @router.patch("/{session_id}", response_model=DataResponse[WorkSessionOut])

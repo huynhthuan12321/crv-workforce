@@ -7,6 +7,7 @@
 | Đang làm – có nhân viên trong ca | [light](01_dang_lam_light.png) | [dark](01_dang_lam_dark.png) | Đạt bố cục chính; thời lượng dùng dạng `3h 28p` thay đồng hồ chạy từng giây để khớp dữ liệu `/working-now`. |
 | Đang làm – danh sách trống | [light](02_dang_lam_trong_light.png) | [dark](02_dang_lam_trong_dark.png) | Đạt; thêm trạng thái rỗng rõ ràng. |
 | Cần xử lý – chưa xử lý | [light](03_can_xu_ly_light.png) | [dark](03_can_xu_ly_dark.png) | Đạt; có lọc GPS / quên ra ca, không có bulk checkbox vì SPEC không yêu cầu. |
+| C?n x? l? ? nh?p gi? ra phi?n qu?n | [light](03b_xu_ly_phien_quen_light.png) | [dark](03b_xu_ly_phien_quen_dark.png) | ??t; gi? ra kh?ng c?n m?c ??nh 20:00, hi?n th? kho?ng gi? h?p l? v? c?c phi?n kh?c c?ng ng?y. |
 | Cần xử lý – đã xử lý | [light](04_da_xu_ly_light.png) | [dark](04_da_xu_ly_dark.png) | Đạt; hiển thị người xử lý, giờ xử lý và lý do. |
 | Cần xử lý – người khác xử lý trước | [light](05_already_handled_light.png) | [dark](05_already_handled_dark.png) | Đạt; banner “Đã xử lý bởi…” lấy từ lỗi `ALREADY_HANDLED.details`. |
 | Duyệt lương – danh sách ngày | [light](06_duyet_luong_light.png) | [dark](06_duyet_luong_dark.png) | Đạt; có chọn tất cả các dòng đủ điều kiện, nút duyệt khóa khi chưa chọn, ngày hiển thị DD/MM/YYYY. |

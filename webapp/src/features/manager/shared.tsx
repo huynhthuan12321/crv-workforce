@@ -31,7 +31,7 @@ export function pendingText(reason: PayrollSummary["pending_reason"]) {
 }
 
 export function reviewType(row: ReviewItem): "gps" | "forgot" {
-  return row.status === "needs_review" || row.review_reason === "forgot_checkout" ? "forgot" : "gps";
+  return row.status === "needs_review" ? "forgot" : "gps";
 }
 
 export function sessionTime(row: {check_in_at: string; check_out_at: string | null; minutes: number | null}) {

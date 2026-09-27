@@ -172,6 +172,7 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("GET", "/api/review/resolved", {"manager", "director"}, None),
         ("POST", f"/api/review/{session_id}/flags-reviewed", {"manager", "director"}, None),
         ("POST", f"/api/review/{session_id}/close", {"manager", "director"}, {"check_out_time": "2026-04-24T08:30:00+07:00", "reason": "dong ca"}),
+        ("GET", f"/api/review/{session_id}/checkout-bounds", {"manager", "director"}, None),
         ("PATCH", f"/api/review/{session_id}", {"manager", "director"}, {"check_in_time": "2026-04-24T07:00:00+07:00", "check_out_time": "2026-04-24T08:00:00+07:00", "reason": "sua gio"}),
         ("GET", f"/api/payroll?date={NOW.date()}", {"manager", "director"}, None),
         ("GET", f"/api/payroll/{employee_id}?date={NOW.date()}", {"manager", "director"}, None),

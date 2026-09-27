@@ -29,6 +29,7 @@ export type MockScenario =
   | "manager_working"
   | "manager_working_empty"
   | "manager_review_pending"
+  | "manager_review_close"
   | "manager_review_resolved"
   | "manager_already_handled"
   | "manager_payroll"
@@ -69,6 +70,7 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_working", label: "QL: Đang làm"},
   {key: "manager_working_empty", label: "QL: Đang làm trống"},
   {key: "manager_review_pending", label: "QL: Cần xử lý"},
+  {key: "manager_review_close", label: "QL: Xử lý phiên quên"},
   {key: "manager_review_resolved", label: "QL: Đã xử lý"},
   {key: "manager_already_handled", label: "QL: Đã xử lý bởi người khác"},
   {key: "manager_payroll", label: "QL: Duyệt lương"},
