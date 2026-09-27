@@ -30,6 +30,7 @@ export const managerScenarios = [
   ["manager_working", "working", "01_dang_lam"],
   ["manager_working_empty", "working", "02_dang_lam_trong"],
   ["manager_review_pending", "review", "03_can_xu_ly"],
+  ["manager_review_close", "review", "03b_xu_ly_phien_quen"],
   ["manager_review_resolved", "review", "04_da_xu_ly"],
   ["manager_already_handled", "review", "05_already_handled"],
   ["manager_payroll", "payroll", "06_duyet_luong"],

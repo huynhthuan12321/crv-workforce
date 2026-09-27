@@ -208,12 +208,12 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
             forgotten = work_session(
                 employee_id,
                 status=SessionStatus.needs_review,
-                check_in=NOW.replace(hour=7),
+                check_in=NOW.replace(hour=6),
                 check_out=None,
             )
             forgotten.review_reason = "forgot_checkout"
             session.add(forgotten)
-            editable = work_session(employee_id, check_in=NOW.replace(hour=9), check_out=NOW.replace(hour=10))
+            editable = work_session(employee_id, check_in=NOW.replace(hour=6, minute=35), check_out=NOW.replace(hour=6, minute=55))
             session.add(editable)
             payable = work_session(employee_id, check_in=NOW.replace(hour=11), check_out=NOW.replace(hour=12))
             session.add(payable)
@@ -225,7 +225,7 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
 
     response = api_client.post(
         f"/api/review/{forgotten_id}/close",
-        json={"check_out_time": "2026-04-24T08:30:00+07:00", "reason": "quan ly dong ca"},
+        json={"check_out_time": "2026-04-24T06:30:00+07:00", "reason": "quan ly dong ca"},
         headers=manager_headers,
     )
     assert response.status_code == 200, response.text
@@ -233,8 +233,8 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
     response = api_client.patch(
         f"/api/review/{editable_id}",
         json={
-            "check_in_time": "2026-04-24T09:15:00+07:00",
-            "check_out_time": "2026-04-24T10:15:00+07:00",
+            "check_in_time": "2026-04-24T06:36:00+07:00",
+            "check_out_time": "2026-04-24T06:56:00+07:00",
             "reason": "dieu chinh gio",
         },
         headers=manager_headers,

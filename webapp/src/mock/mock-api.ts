@@ -74,6 +74,17 @@ class MockApi {
     if (path === "/working-now") {
       return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
     }
+    if (path.startsWith("/review/") && path.endsWith("/checkout-bounds")) {
+      return {
+        session_id: Number(path.split("/")[2]),
+        min_check_out: "2024-04-24T08:06:00+07:00",
+        max_check_out: "2024-04-24T13:10:00+07:00",
+        sessions: [
+          {...mockReviewPending[0], id: 501, status: "closed", check_in_at: "2024-04-24T06:12:00+07:00", check_out_at: "2024-04-24T07:35:00+07:00", minutes: 83},
+          {...mockReviewPending[2], id: 503, status: "needs_review"},
+        ],
+      } as T;
+    }
     if (path.startsWith("/review/pending")) return mockReviewPending as T;
     if (path.startsWith("/review/resolved")) return mockReviewResolved as T;
     if (path.includes("/flags-reviewed") && options.method === "POST") {

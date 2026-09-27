@@ -58,6 +58,13 @@ class ReviewResolvedOut(ReviewSessionOut):
     reason: str | None = None
 
 
+class CheckoutBoundsOut(BaseModel):
+    session_id: int
+    min_check_out: str
+    max_check_out: str
+    sessions: list[WorkSessionOut]
+
+
 class TodayOut(BaseModel):
     open_session: WorkSessionOut | None
     estimated_day_amount: int = Field(description="VND")
