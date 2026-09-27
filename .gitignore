@@ -219,3 +219,4 @@ pip-selfcheck.json
 !/scripts/**
 scripts/**/__pycache__/
 !webapp/src/lib/
+!webapp/src/lib/
