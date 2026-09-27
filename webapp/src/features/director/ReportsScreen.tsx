@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {api} from "../../api/client";
-import {Button, Card, Metric, ScreenState, SectionTitle} from "../../components/ui";
+import {Button, Card, Metric, ScreenState, SectionTitle, SearchInput} from "../../components/ui";
 import {fmtMoney} from "../../lib/format";
 import {periodBounds, periodLabel, shiftPeriod, type ReportPeriod} from "../../lib/report-period";
 import {fmtHours, fmtKg} from "../../lib/report-format";
@@ -19,12 +19,16 @@ function ReportChart({rows}: {rows: ReportTimeseries[]}) {
   });
   return <div className="report-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ giờ công và lương">
     <line x1={left} y1={top} x2={left} y2={top + plotH} stroke="var(--crv-border)" />
+    <line x1={width - 10} y1={top} x2={width - 10} y2={top + plotH} stroke="var(--crv-border)" />
     <line x1={left} y1={top + plotH} x2={width - 10} y2={top + plotH} stroke="var(--crv-border)" />
+    <text x={left - 24} y={top + 8} className="chart-axis-label">Giờ</text>
+    <text x={width - 10} y={top + 8} textAnchor="end" className="chart-axis-label">Lương</text>
     {rows.map((row, index) => {
       const barW = Math.max(12, plotW / rows.length - 8);
       const x = left + (index * plotW) / Math.max(rows.length - 1, 1) - barW / 2;
       const h = (row.minutes / maxMinutes) * plotH;
-      return <rect key={row.date} x={x} y={top + plotH - h} width={barW} height={h} rx="4" fill="var(--crv-primary-soft)" onClick={() => window.alert(`${row.date}: ${fmtHours(row.minutes)}, ${fmtMoney(row.salary)}`)} />;
+      const visibleHeight = h || 8;
+      return <rect key={row.date} x={x} y={top + plotH - visibleHeight} width={barW} height={visibleHeight} rx="4" fill={h ? "var(--crv-primary-soft)" : "transparent"} stroke={h ? "none" : "var(--crv-border)"} aria-label={`${row.date}: ${fmtHours(row.minutes)}, ${fmtMoney(row.salary)}`} onClick={() => window.alert(`${row.date}: ${fmtHours(row.minutes)}, ${fmtMoney(row.salary)}`)} />;
     })}
     <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="var(--crv-warning)" strokeWidth="3" />
     {points.map((point) => <circle key={point.row.date} cx={point.x} cy={point.y} r="3.5" fill="var(--crv-warning)" />)}
@@ -37,7 +41,7 @@ function EmployeePicker({selected, onSelect, onClose}: {selected: ReportEmployee
   useEffect(() => { void api.get<ReportEmployee[]>(`/reports/employees${query ? `?q=${encodeURIComponent(query)}` : ""}`).then(setRows); }, [query]);
   return <div className="screen-stack"><Button tone="ghost" className="back-button" onClick={onClose}>← Quay lại</Button><Card>
     <SectionTitle eyebrow="Bộ lọc" title="Chọn nhân viên" />
-    <input className="search-input" placeholder="Tìm tên hoặc mã" value={query} onChange={(event) => setQuery(event.target.value)} />
+    <SearchInput placeholder="Tìm tên hoặc mã" value={query} onChange={(event) => setQuery(event.target.value)} />
     <button className={`picker-row ${!selected ? "active" : ""}`} onClick={() => { onSelect(null); onClose(); }}>Tất cả nhân viên</button>
     {rows.map((row) => <button key={row.id} className={`picker-row ${selected?.id === row.id ? "active" : ""}`} onClick={() => { onSelect(row); onClose(); }}>{row.code} · {row.full_name}</button>)}
   </Card></div>;
@@ -83,7 +87,7 @@ export function ReportsScreen() {
     <div className="report-period-nav"><button onClick={() => setDate(shiftPeriod(period, date, -1))}>‹</button><b>{periodLabel(period, date)}</b><button disabled={!canNext} onClick={() => setDate(shiftPeriod(period, date, 1))}>›</button></div>
     <button className="filter-chip" onClick={() => setPicker(true)}>{employee ? `${employee.code} · ${employee.full_name} ✕` : "Tất cả nhân viên"}</button>
     <div className="mini-grid"><Metric label="Giờ công" value={fmtHours(summary.minutes)} /><Metric label="Tổng túi" value={summary.bags.toLocaleString("vi-VN")} /><Metric label="Tổng kg" value={fmtKg(summary.kg)} /></div>
-    <Card><SectionTitle title="Lương" /><div className="mini-grid"><Metric label="Đã trả" value={fmtMoney(summary.paid)} tone="success" /><Metric label="Tạm tính" value={fmtMoney(summary.pending)} tone="warning" /><Metric label="Tổng" value={fmtMoney(summary.total)} /></div></Card>
+    <Card><SectionTitle title="Lương" /><div className="salary-total"><Metric label="Tổng" value={fmtMoney(summary.total)} /></div><div className="mini-grid"><Metric label="Đã trả" value={fmtMoney(summary.paid)} tone="success" /><Metric label="Tạm tính" value={fmtMoney(summary.pending)} tone="warning" /></div></Card>
     <Card><SectionTitle title="Biểu đồ theo ngày" /><ReportChart rows={series} /></Card>
     <Card><SectionTitle title="Sản lượng theo mặt hàng" /><div className="product-table"><div className="product-table__head"><span>Mặt hàng</span><span>Túi</span><span>Kg</span></div>{products.map((row) => <div className="product-table__row" key={row.code}><span>{row.name}</span><span>{row.bags}</span><span>{row.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</span></div>)}<div className="product-table__row product-table__total"><b>Tổng</b><b>{total.bags}</b><b>{total.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</b></div></div></Card>
   </div>;

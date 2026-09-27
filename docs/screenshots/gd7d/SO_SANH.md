@@ -17,5 +17,7 @@
 Kiểm tra kỹ thuật:
 
 - `npm run test:overflow`: 148 kịch bản ở 360px/390px, sáng/tối.
+- Báo cáo ngày/tuần/tháng/lọc nhân viên được chụp fullPage; biểu đồ tuần có đủ 7 cột (kể cả ngày 0 dữ liệu), nhãn trục Giờ/Lương và chú thích.
+- Tab bar dưới dùng nền đặc theo theme, không để nội dung phía sau lộ qua.
 - Production bundle không import dữ liệu mock khi build production.
 - Không thêm thư viện biểu đồ; biểu đồ là SVG tự viết.

@@ -851,6 +851,12 @@ input:disabled {
   font-size: 12px;
 }
 
+.chart-axis-label {
+  fill: var(--crv-hint);
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .product-table {
   display: grid;
   gap: 6px;
@@ -1034,9 +1040,44 @@ input:disabled {
   gap: 6px;
   overflow-x: auto;
   border-top: 1px solid var(--crv-border);
-  background: color-mix(in srgb, var(--crv-card) 92%, transparent);
+  background: var(--crv-card);
   box-shadow: 0 -10px 30px var(--crv-shadow);
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+}
+
+.search-field {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--crv-border);
+  border-radius: 14px;
+  background: var(--crv-card);
+  color: var(--crv-hint);
+}
+
+.search-field span {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.search-field input {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--crv-text);
+}
+
+.salary-total {
+  margin-bottom: 10px;
+}
+
+.salary-total b {
+  font-size: 24px;
 }
 
 .bottom-tabs button {

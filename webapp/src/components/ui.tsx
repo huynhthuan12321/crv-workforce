@@ -66,3 +66,12 @@ export function Metric({label, value, tone = "neutral"}: {label: string; value: 
     </div>
   );
 }
+
+export function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="search-field">
+      <span aria-hidden="true">⌕</span>
+      <input {...props} />
+    </label>
+  );
+}

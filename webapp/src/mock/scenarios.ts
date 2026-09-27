@@ -136,11 +136,13 @@ export const mockReportProducts = [
 ];
 
 export const mockReportSeries = [
-  {date: "2026-09-21", minutes: 480, salary: 392000, paid: 280000, pending: 112000, bags: 160, kg: 220},
+  {date: "2026-09-21", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
   {date: "2026-09-22", minutes: 510, salary: 420000, paid: 420000, pending: 0, bags: 180, kg: 240},
   {date: "2026-09-23", minutes: 465, salary: 378000, paid: 250000, pending: 128000, bags: 140, kg: 190},
   {date: "2026-09-24", minutes: 540, salary: 448000, paid: 448000, pending: 0, bags: 210, kg: 280},
   {date: "2026-09-25", minutes: 495, salary: 410000, paid: 300000, pending: 110000, bags: 180, kg: 234},
+  {date: "2026-09-26", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
+  {date: "2026-09-27", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
 ];
 
 export const mockReportSummary = {

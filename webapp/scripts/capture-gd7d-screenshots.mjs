@@ -14,7 +14,7 @@ try {
       const page = await browser.newPage();
       await page.setViewport({width: 390, height: 844, deviceScaleFactor: 1, isMobile: true});
       await page.goto(`${baseUrl}/?scenario=${scenario}&tab=${tab}&theme=${theme}`, {waitUntil: "networkidle0"});
-      await page.screenshot({path: resolve(outDir, `${name}_${theme}.png`)});
+      await page.screenshot({path: resolve(outDir, `${name}_${theme}.png`), fullPage: true});
       await page.close();
     }
   }

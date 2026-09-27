@@ -19,3 +19,5 @@ Các ảnh dưới đây được chụp bằng mock DEV (`VITE_MOCK=1`), mobile
 | Tài khoản bị khóa | [light](11_bi_khoa_light.png) | [dark](11_bi_khoa_dark.png) | Tự thiết kế cùng phong cách vì ảnh gốc thiếu màn này. |
 | Phiên đăng nhập hết hạn | [light](12_het_phien_light.png) | [dark](12_het_phien_dark.png) | Tự thiết kế cùng phong cách vì ảnh gốc thiếu màn này. |
 | Lỗi mạng / 502 dễ hiểu | [light](13_loi_mang_light.png) | [dark](13_loi_mang_dark.png) | Đã thay lỗi HTML/Unexpected token bằng thông báo mạng dễ hiểu. |
+
+Tab bar dưới dùng nền đặc theo theme, không để nội dung phía sau lộ qua.

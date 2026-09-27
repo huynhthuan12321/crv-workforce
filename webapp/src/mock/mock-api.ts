@@ -69,7 +69,7 @@ class MockApi {
       return mockReportSummary as T;
     }
     if (path.startsWith("/reports/products")) return mockReportProducts as T;
-    if (path.startsWith("/reports/timeseries")) return (this.scenario === "director_report_day" ? [mockReportSeries[0]] : mockReportSeries) as T;
+    if (path.startsWith("/reports/timeseries")) return (this.scenario === "director_report_day" ? [mockReportSeries[1]] : mockReportSeries) as T;
     if (path === "/working-now") {
       return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
     }
