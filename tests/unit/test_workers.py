@@ -5,7 +5,7 @@ import pytest
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from sqlalchemy import select
 
-from source.database.models import EmployeeOrm, NotificationOutboxOrm, PayBatchOrm, WorkSessionOrm
+from source.database.models import EmployeeOrm, NotificationOutboxOrm, PayBatchOrm, SyncOutboxOrm, WorkSessionOrm
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import PayrollService, ReviewService
 from source.utils.clock import FakeClock, VIETNAM_TZ
@@ -14,6 +14,7 @@ from source.workers import (
     escalate_job,
     notification_text,
     process_notifications,
+    process_lark,
     reminder_job,
     run_startup_jobs,
     sweep_job,
@@ -187,3 +188,38 @@ async def test_process_notifications_403_failed_and_429_stops_batch(session_fact
     await process_notifications(resumed_bot, session_factory, FakeClock(NOW + timedelta(seconds=31)))
     assert len(resumed_bot.sent) >= 1
     workers_module._notifications_paused_until = None
+
+
+async def test_process_lark_sends_stable_event_id_and_outbox_id(session_factory, monkeypatch):
+    sent = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, content, headers):
+            sent.append((url, content, headers))
+            return FakeResponse()
+
+    monkeypatch.setattr(workers_module.settings.lark, "sync_webhook_url", "https://n8n.local/webhook")
+    monkeypatch.setattr(workers_module.httpx, "AsyncClient", FakeClient)
+    async with session_factory() as session, session.begin():
+        session.add(SyncOutboxOrm(event_type="session_closed", payload={"event_id": "evt-1", "session_id": 123}))
+
+    await process_lark(session_factory, FakeClock(NOW))
+
+    assert len(sent) == 1
+    _, content, headers = sent[0]
+    assert headers["X-CRV-Event-Id"] == "evt-1"
+    assert b'"event_id":"evt-1"' in content
+    assert b'"outbox_id":1' in content

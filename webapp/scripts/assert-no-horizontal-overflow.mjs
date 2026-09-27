@@ -7,7 +7,8 @@ const browser = await puppeteer.launch({executablePath: chromePath, headless: tr
 const failures = [];
 
 try {
-  for (const width of [360, 390]) {
+  const widths = [360, 390, 430];
+  for (const width of widths) {
     for (const theme of ["light", "dark"]) {
       for (const [scenario, tab] of scenarios) {
         const page = await browser.newPage();
@@ -33,4 +34,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`No horizontal overflow: ${scenarios.length * 2 * 2} cases`);
+console.log(`No horizontal overflow: ${scenarios.length * 2 * 3} cases`);
