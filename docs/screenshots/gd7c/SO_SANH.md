@@ -26,3 +26,4 @@ Kiểm tra kỹ thuật:
 - Ảnh tối dùng biến theme; không còn nền sáng/chữ tối như lỗi GĐ7b trước đó.
 - Bundle production đã kiểm tra không chứa dữ liệu mock (`Nguyễn Văn A`, `mock-token`, `manager_working`, `QL:`).
 - Ô ngày ở Duyệt lương, Thêm nhân viên và Thêm đơn giá đều có nhãn DD/MM/YYYY theo múi giờ Việt Nam.
+- Tab bar dưới đã dùng nền đặc theo theme, áp dụng nhất quán cho các màn quản lý.

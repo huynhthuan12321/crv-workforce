@@ -2,6 +2,31 @@
 
 Mỗi payload trong `sync_outbox.payload` có `event_id` UUID để n8n/Lark chống ghi trùng. Backend ghi outbox trong cùng transaction với thay đổi nghiệp vụ; nếu transaction rollback thì không có sự kiện được gửi.
 
+Khi gửi webhook, worker gửi thêm:
+
+- Header `X-CRV-Event-Id`: chính là `event_id` của payload, giữ nguyên qua mọi lần retry.
+- Trường `outbox_id` trong body: ID bản ghi `sync_outbox` để truy vết vận hành.
+
+## Idempotency – BẮT BUỘC ở GĐ8
+
+n8n phải ghi Lark theo cơ chế idempotent. Khóa khuyến nghị:
+
+1. Ưu tiên `event_id` cho mọi bảng log/sự kiện.
+2. Với bảng trạng thái nghiệp vụ có khóa tự nhiên, dùng upsert theo:
+   - `session_closed` / `session_updated`: `event_type + session_id` hoặc cột unique `session_id`.
+   - `batch_paid`: `event_type + batch_id`.
+   - `output_submitted`: `event_type + session_id + ma_mat_hang`.
+
+Kịch bản test bắt buộc ở GĐ8:
+
+```text
+worker gửi event E tới n8n
+→ n8n ghi Lark thành công
+→ response về worker bị timeout
+→ worker retry lại cùng event_id E và cùng outbox_id
+→ Lark không có bản ghi trùng, chỉ cập nhật/upsert bản ghi cũ
+```
+
 ## Payload sự kiện
 
 ### `session_closed`

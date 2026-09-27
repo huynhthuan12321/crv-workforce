@@ -58,11 +58,20 @@ export function SectionTitle({eyebrow, title, action}: {eyebrow?: string; title:
   );
 }
 
-export function Metric({label, value, tone = "neutral"}: {label: string; value: ReactNode; tone?: "neutral" | "success" | "warning"}) {
+export function Metric({label, value, tone = "neutral"}: {label: string; value: ReactNode; tone?: "neutral" | "success" | "warning" | "info"}) {
   return (
     <div className={`metric metric--${tone}`}>
       <small>{label}</small>
       <b>{value}</b>
     </div>
+  );
+}
+
+export function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="search-field">
+      <span aria-hidden="true">⌕</span>
+      <input {...props} />
+    </label>
   );
 }

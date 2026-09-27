@@ -24,7 +24,7 @@ async def get_current_employee(
     if not credentials:
         dev_telegram_id = request.headers.get("X-Dev-Telegram-Id")
         if settings.app.env == "development" and settings.auth.dev_bypass and dev_telegram_id:
-            logger.warning("AUTH__DEV_BYPASS used for telegram_id={}", dev_telegram_id)
+            logger.warning("AUTH__DEV_BYPASS used")
             try:
                 telegram_id = int(dev_telegram_id)
             except ValueError as exc:

@@ -114,8 +114,13 @@ Gồm hai loại:
 
 ### 2.12. Báo cáo (giám đốc)
 
+- Lương trong báo cáo = **Đã trả + Chờ duyệt + Cần xử lý trước**:
+  - **Đã trả**: tổng `pay_batches.amount`.
+  - **Chờ duyệt**: đúng bằng tổng `pending_amount` của `PayrollService` cho từng cặp (nhân viên, ngày), dùng chung logic phiên đủ điều kiện với duyệt lương.
+  - **Cần xử lý trước**: phần còn lại của các phiên đã đóng chưa vào đợt nhưng còn cờ GPS chưa xem. Tính theo làm tròn ngày: `ceil(tổng thô mọi phiên đã đóng) − đã trả − chờ duyệt`, không âm.
+  - Phiên `needs_review` (quên ra ca, chưa có giờ ra) không tính tiền, chỉ đếm số phiên để hiển thị cảnh báo.
 - Lọc theo ngày / tuần / tháng và theo nhân viên.
-- Chỉ số: tổng giờ công, tổng lương (đã trả + tạm tính chưa trả), tổng túi, tổng kg.
+- Chỉ số: tổng giờ công, tổng lương (đã trả + chờ duyệt + cần xử lý trước), tổng túi, tổng kg.
 - Biểu đồ giờ công theo thời gian. Bảng sản lượng theo mặt hàng.
 
 ### 2.13. Dữ liệu cá nhân

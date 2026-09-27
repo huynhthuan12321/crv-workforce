@@ -64,3 +64,18 @@ alembic downgrade -1
 Ghi chú migration: bảng `users` là bảng legacy của template, được giữ ở migration 0001–0002 để không phá lịch sử migration; schema CRV không dùng bảng này nên `migrations/env.py` bỏ qua bảng `users` khi `alembic check` / autogenerate.
 
 Ghi chú seed: mỗi lần chạy `scripts/db_seed.py` sẽ tạo link mời MỚI và vô hiệu link cũ chưa dùng của người chưa liên kết Telegram.
+## Trước khi báo hoàn thành một giai đoạn
+
+Chạy bộ kiểm tra tổng hợp, không để test PostgreSQL bị skip âm thầm:
+
+```powershell
+.\scripts\test_all.ps1
+```
+
+Trên Linux/macOS:
+
+```bash
+bash scripts/test_all.sh
+```
+
+Script sẽ bật `db`/`redis`, tạo DB test `crv_workforce_test`, đặt `CRV_REQUIRE_POSTGRES=1`, chạy toàn bộ pytest với `TEST_DATABASE_URL`, kiểm tra migration trên DB trống `crv_workforce_migcheck`, rồi chạy `npm test`, `npm run build`, `npm run test:overflow`. Kết quả hợp lệ phải có `pytest` skip = 0.

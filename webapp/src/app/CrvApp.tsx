@@ -3,17 +3,16 @@ import {ApiError, api} from "../api/client";
 import {ErrorBoundary} from "../components/ErrorBoundary";
 import {ScreenState} from "../components/ui";
 import {AccessScreen} from "../features/access/AccessScreen";
-import {PlaceholderScreen} from "../features/access/PlaceholderScreen";
 import {AttendanceScreen} from "../features/attendance/AttendanceScreen";
 import {ConsentGate} from "../features/consent/ConsentGate";
 import {PrivacyScreen} from "../features/consent/PrivacyScreen";
 import {HistoryScreen} from "../features/history/HistoryScreen";
 import {EmployeesScreen, PayrollScreen, ReviewScreen, WorkingScreen} from "../features/manager/ManagerScreens";
 import {OutputsScreen} from "../features/outputs/OutputsScreen";
+import {ReportsScreen} from "../features/director/ReportsScreen";
 import {useTelegram} from "../hooks/useTelegram";
 import type {Employee, TabKey} from "../types/api";
 import {AppShell, type SpecialScreen} from "./AppShell";
-import {tabLabels} from "./labels";
 
 function useBackButton(active: boolean, onBack: () => void) {
   useEffect(() => {
@@ -40,7 +39,8 @@ function MockToolbarHost({onChange}: {onChange: () => void}) {
   useEffect(() => {
     if (!USE_MOCK) return;
     let active = true;
-    void import("../mock/MockToolbar").then((module) => {
+    const modulePath = "/src/mock/MockToolbar.tsx";
+    void import(/* @vite-ignore */ modulePath).then((module) => {
       if (active) setToolbar(() => module.MockToolbar);
     });
     return () => {
@@ -112,7 +112,7 @@ export function CrvApp() {
     review: <ReviewScreen />,
     payroll: <PayrollScreen />,
     employees: <EmployeesScreen />,
-    reports: <PlaceholderScreen title={tabLabels.reports} />,
+    reports: <ReportsScreen />,
   };
 
   return (

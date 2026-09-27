@@ -217,11 +217,13 @@ async def process_lark(factory: async_sessionmaker[AsyncSession], clock: Clock |
         ).order_by(SyncOutboxOrm.id).limit(50))).all())
         async with httpx.AsyncClient(timeout=15) as client:
             for row in rows:
-                body = json.dumps({"event_type": row.event_type, **row.payload}, ensure_ascii=False, separators=(",", ":")).encode()
+                event_id = (row.payload or {}).get("event_id", "")
+                body = json.dumps({"outbox_id": row.id, "event_type": row.event_type, **row.payload}, ensure_ascii=False, separators=(",", ":")).encode()
                 signature = hmac.new(settings.lark.sync_secret.get_secret_value().encode(), body, hashlib.sha256).hexdigest()
                 try:
                     response = await client.post(settings.lark.sync_webhook_url, content=body,
-                        headers={"Content-Type": "application/json", "X-CRV-Signature": signature})
+                        headers={"Content-Type": "application/json", "X-CRV-Signature": signature,
+                                 "X-CRV-Event-Id": str(event_id)})
                     response.raise_for_status()
                     row.status, row.sent_at = OutboxStatus.sent, now
                 except Exception as exc:

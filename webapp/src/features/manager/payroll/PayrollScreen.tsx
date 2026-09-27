@@ -12,7 +12,8 @@ export function PayrollScreen() {
   const [selectedIds, setSelectedIds] = useState<number[]>(
     new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_confirm" ? [2, 4] : [],
   );
-  const [detailId, setDetailId] = useState<number | null>(new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_a_detail" ? 1 : null);
+  const detailScenario = new URLSearchParams(window.location.search).get("scenario");
+  const [detailId, setDetailId] = useState<number | null>(detailScenario === "manager_payroll_a_detail" || detailScenario === "director_payroll_detail" ? 1 : null);
   const [confirm, setConfirm] = useState(new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_confirm");
   const [result, setResult] = useState<PayrollApproveResult[] | null>(new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_done" ? [
     {employee_id: 2, batch_id: 20, batch_no: 1, amount: 224000},

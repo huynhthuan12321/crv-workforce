@@ -6,11 +6,17 @@ from source.api.dependencies import get_session
 from source.api.workforce_auth import require_roles
 from source.database.models import EmployeeOrm
 from source.enums import EmployeeRole
-from source.schemas.workforce import DataResponse, ProductTotalOut, ReportSummaryOut, ReportTimeseriesOut
+from source.schemas.workforce import DataResponse, ProductTotalOut, ReportEmployeeOut, ReportSummaryOut, ReportTimeseriesOut
 from source.services.workforce import ReportService
 
 router = APIRouter()
 director_only = require_roles(EmployeeRole.director)
+
+
+@router.get("/employees", response_model=DataResponse[list[ReportEmployeeOut]])
+async def employees(q: str | None = None, _: EmployeeOrm = Depends(director_only),
+                    session: AsyncSession = Depends(get_session)):
+    return {"data": await ReportService(session).employees(q)}
 
 
 @router.get("/summary", response_model=DataResponse[ReportSummaryOut])

@@ -68,6 +68,8 @@ async def clear_rate_limit_state() -> None:
 async def pg_factory():
     url = os.getenv("TEST_DATABASE_URL")
     if not url:
+        if os.getenv("CRV_REQUIRE_POSTGRES") == "1":
+            pytest.fail("CRV_REQUIRE_POSTGRES=1 but TEST_DATABASE_URL is not set")
         pytest.skip("TEST_DATABASE_URL is not set")
     engine = create_async_engine(url, pool_pre_ping=True, poolclass=NullPool)
     async with engine.begin() as conn:
@@ -363,6 +365,23 @@ async def test_report_salary_uses_daily_paid_plus_pending_not_period_raw_ceiling
     assert data["pending"] == 153000
     assert data["total"] == 315000
     assert data["total"] != 314000
+    assert data["from"] == "2026-04-20"
+    assert data["to"] == "2026-04-26"
+
+
+async def test_director_report_employees_search(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            director = await seed_actor(session, "GDREP", EmployeeRole.director, 7001)
+            await seed_actor(session, "NV001", EmployeeRole.employee, 7002)
+            await seed_actor(session, "NV002", EmployeeRole.employee, 7003)
+            await seed_actor(session, "QL001", EmployeeRole.manager, 7004)
+            director_id = director.id
+    response = api_client.get("/api/reports/employees?q=NV001", headers=auth_headers(director_id))
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert [(row["code"], row["full_name"]) for row in data] == [("NV001", "NV001")]
+    assert "current_hourly_rate" not in data[0]
 
 
 async def test_history_grouped_by_day_shows_batch_money_and_output(api_client, pg_factory):
