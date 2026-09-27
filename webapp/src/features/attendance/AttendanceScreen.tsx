@@ -2,10 +2,11 @@ import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiError, api} from "../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../components/ui";
 import {elapsedMinutes, elapsedSeconds, temporarySalary} from "../../lib/clock";
-import {appNow, fmtClock, fmtDateLong, fmtDuration, isAfterCheckinCutoff} from "../../lib/date-vn";
+import {fmtClock, fmtDateLong, fmtDuration} from "../../lib/date-vn";
 import {fmtMoney} from "../../lib/format";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
 import {canOpenTelegramLocationSettings, getCurrentLocation, openTelegramLocationSettings} from "../../lib/location";
+import {serverNow, syncServerClock} from "../../lib/server-clock";
 import type {Today, WorkSession} from "../../types/api";
 
 function gpsText(session?: WorkSession | null) {
@@ -41,13 +42,17 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
-  const [now, setNow] = useState(() => appNow());
+  const [now, setNow] = useState(() => serverNow());
 
-  const load = useCallback(() => api.get<Today>("/attendance/today").then(setToday).catch((e) => setError((e as Error).message)), []);
+  const load = useCallback(() => api.get<Today>("/attendance/today").then((data) => {
+    syncServerClock(data.server_now);
+    setNow(serverNow());
+    setToday(data);
+  }).catch((e) => setError((e as Error).message)), []);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const tick = window.setInterval(() => setNow(appNow()), 1000);
+    const tick = window.setInterval(() => setNow(serverNow()), 1000);
     const refresh = window.setInterval(() => void load(), 60000);
     return () => {
       window.clearInterval(tick);
@@ -58,7 +63,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
   const open = today?.open_session ?? null;
   const minutes = open ? elapsedMinutes(open.check_in_at, now) : 0;
   const salary = open ? temporarySalary(minutes, open.rate_snapshot) : today?.estimated_day_amount ?? 0;
-  const afterCutoff = !open && isAfterCheckinCutoff(now);
+  const afterCutoff = !open && today ? !today.can_check_in : false;
   const gps = gpsText(open);
 
   const runAction = async () => {
@@ -148,10 +153,10 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
           <Chip tone={afterCutoff ? "warning" : "info"}>{afterCutoff ? "Đã qua giờ" : "Sẵn sàng"}</Chip>
         </div>
         <div className="clock-illustration">{afterCutoff ? "☾" : "▶"}</div>
-        <h2>{afterCutoff ? "Đã qua 18:00" : "Sẵn sàng làm việc!"}</h2>
-        <p className="muted">{afterCutoff ? "Không thể vào ca từ 18:00. Vui lòng quay lại vào ngày mai." : "Nhấn nút để vào ca. Backend sẽ kiểm tra giờ máy chủ và vị trí GPS."}</p>
+        <h2>{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
+        <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn nút để vào ca. Backend sẽ kiểm tra giờ máy chủ và vị trí GPS."}</p>
         {error && <p className="form-error">{error}</p>}
-        <Button className="round-action" disabled={afterCutoff} busy={busy} onClick={runAction}>VÀO CA</Button>
+        <Button className="round-action" disabled={!today.can_check_in} busy={busy} onClick={runAction}>VÀO CA</Button>
       </Card>
     </div>
   );

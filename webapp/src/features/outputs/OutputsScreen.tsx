@@ -4,6 +4,7 @@ import {Button, Card, Chip, ScreenState, SectionTitle} from "../../components/ui
 import {fmtCountdown, fmtTime} from "../../lib/date-vn";
 import {fmtKg, totalKg} from "../../lib/format";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
+import {serverNow, syncServerClock} from "../../lib/server-clock";
 import type {History, HistorySession, OutputForm, OutputSubmit} from "../../types/api";
 
 function eligibleSessions(history: History): HistorySession[] {
@@ -19,13 +20,13 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
   const [form, setForm] = useState<OutputForm>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(() => serverNow());
 
   const loadHistory = useCallback(() => api.get<History>("/history").then(setHistory).catch((e) => setError((e as Error).message)), []);
 
   useEffect(() => { void loadHistory(); }, [loadHistory]);
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000);
+    const id = window.setInterval(() => setNow(serverNow()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -38,7 +39,11 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
 
   const loadForm = useCallback((sessionId: number) => {
     setError("");
-    return api.get<OutputForm>(`/outputs/${sessionId}`).then(setForm).catch((e) => setError((e as Error).message));
+    return api.get<OutputForm>(`/outputs/${sessionId}`).then((data) => {
+      syncServerClock(data.server_now);
+      setNow(serverNow());
+      setForm(data);
+    }).catch((e) => setError((e as Error).message));
   }, []);
 
   useEffect(() => {
@@ -51,6 +56,12 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
 
   const secondsRemaining = form ? Math.max(0, Math.floor((new Date(form.locked_at).getTime() - now.getTime()) / 1000)) : 0;
   const locked = Boolean(form?.locked || secondsRemaining <= 0);
+
+  useEffect(() => {
+    if (form && !form.locked && secondsRemaining <= 0) {
+      void loadForm(form.session_id);
+    }
+  }, [form, loadForm, secondsRemaining]);
 
   const updateBag = (code: string, bags: number) => {
     setForm((current) => current ? {
