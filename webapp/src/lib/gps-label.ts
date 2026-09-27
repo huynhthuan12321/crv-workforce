@@ -16,7 +16,7 @@ export function gpsLabel(row: GpsLabelInput): string {
     const accuracy = row.flag_source === "check_out"
       ? row.check_out_accuracy_m
       : Math.max(Number(row.check_in_accuracy_m ?? 0), Number(row.check_out_accuracy_m ?? 0));
-    return `Sai số GPS lớn (±${round(accuracy)} m)`;
+    return `Sai số vị trí lớn (±${round(accuracy)} m)`;
   }
 
   if (row.flags.includes("gps_out_of_range")) {

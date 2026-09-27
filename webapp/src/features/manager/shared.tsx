@@ -25,7 +25,7 @@ export function errorText(error: unknown) {
 
 export function pendingText(reason: PayrollSummary["pending_reason"]) {
   if (reason === "open_session") return "Có phiên đang mở, sẽ vào đợt sau";
-  if (reason === "unreviewed_gps") return "Có cờ GPS chưa xử lý";
+  if (reason === "unreviewed_gps") return "Có vị trí cần quản lý xem lại";
   if (reason === "forgot_checkout") return "Có phiên quên ra ca";
   return "Sẵn sàng duyệt";
 }

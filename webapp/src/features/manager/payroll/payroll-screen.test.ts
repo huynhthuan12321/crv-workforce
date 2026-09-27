@@ -32,7 +32,7 @@ describe("payroll row status", () => {
       has_open_session: true,
       pending_reason: "unreviewed_gps",
       pending_reasons: ["unreviewed_gps", "open_session"],
-    })).toBe("Cần xử lý GPS");
+    })).toBe("Cần xem lại vị trí");
   });
 
   it("distinguishes employees without sessions from paid-up employees", () => {

@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiError, api} from "../../api/client";
-import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../components/ui";
+import {Button, Card, Chip, Metric, ScreenState} from "../../components/ui";
 import {elapsedMinutes, elapsedSeconds, temporarySalary} from "../../lib/clock";
 import {fmtClock, fmtDateLong, fmtDuration} from "../../lib/date-vn";
 import {fmtMoney} from "../../lib/format";
@@ -12,10 +12,10 @@ import type {Today, WorkSession} from "../../types/api";
 function gpsText(session?: WorkSession | null) {
   if (!session) return null;
   if (session.flags.includes("gps_out_of_range")) {
-    return {tone: "warning" as const, text: `Vị trí ngoài xưởng – đã gắn cờ · cách ${Math.round(session.check_in_distance_m)} m`};
+    return {tone: "warning" as const, text: `Vị trí ngoài xưởng – cần quản lý xem lại · cách ${Math.round(session.check_in_distance_m)} m`};
   }
   if (session.flags.includes("gps_low_accuracy")) {
-    return {tone: "warning" as const, text: "GPS sai số lớn – đã gắn cờ"};
+    return {tone: "warning" as const, text: "Vị trí chưa đủ chính xác – cần quản lý xem lại"};
   }
   return {tone: "success" as const, text: `Trong khu vực xưởng (${Math.round(session.check_in_distance_m)} m)`};
 }
@@ -131,7 +131,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
           {confirmOut && (
             <div className="confirm-box">
               <b>Xác nhận ra ca?</b>
-              <p>Hệ thống sẽ lấy vị trí hiện tại và khóa thời điểm ra ca theo giờ máy chủ.</p>
+              <p>Ứng dụng sẽ lấy vị trí hiện tại và ghi nhận giờ ra ca theo giờ hệ thống.</p>
             </div>
           )}
           {error && <p className="form-error">{error}</p>}
@@ -152,11 +152,26 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
           </div>
           <Chip tone={afterCutoff ? "warning" : "info"}>{afterCutoff ? "Đã qua giờ" : "Sẵn sàng"}</Chip>
         </div>
-        <div className="clock-illustration">{afterCutoff ? "☾" : "▶"}</div>
+        {afterCutoff && <div className="clock-illustration clock-illustration--decorative" aria-hidden="true">☾</div>}
         <h2>{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
-        <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn nút để vào ca. Backend sẽ kiểm tra giờ máy chủ và vị trí GPS."}</p>
+        <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn VÀO CA khi bắt đầu làm việc. Ứng dụng sẽ lấy vị trí của bạn tại thời điểm này."}</p>
         {error && <p className="form-error">{error}</p>}
-        <Button className="round-action" disabled={!today.can_check_in} busy={busy} onClick={runAction}>VÀO CA</Button>
+        <button
+          type="button"
+          className="round-action"
+          disabled={!today.can_check_in || busy}
+          aria-disabled={!today.can_check_in || busy}
+          onClick={runAction}
+        >
+          {busy ? (
+            <span className="round-action__spinner" aria-label="Đang xử lý" />
+          ) : (
+            <>
+              <span className="round-action__icon" aria-hidden="true">▶</span>
+              <span>VÀO CA</span>
+            </>
+          )}
+        </button>
       </Card>
     </div>
   );

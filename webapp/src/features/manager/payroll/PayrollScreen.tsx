@@ -18,7 +18,7 @@ function payrollDone(row: PayrollSummary) {
 export function payrollStatusText(row: PayrollSummary): string {
   if (!row.has_sessions) return "Chưa có phiên";
   if (row.can_approve) return "Có thể duyệt";
-  if (row.blocked_amount > 0) return "Cần xử lý GPS";
+  if (row.blocked_amount > 0) return "Cần xem lại vị trí";
   if (payrollDone(row)) return "Đã trả hết";
   return "Chưa đủ điều kiện";
 }
@@ -122,9 +122,9 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
                   onClick={(event) => event.stopPropagation()}
                   onChange={() => setSelectedIds((ids) => checked ? ids.filter((id) => id !== row.employee_id) : [...ids, row.employee_id])}
                 />
-              ) : payrollStatusText(row) === "Cần xử lý GPS" ? (
+              ) : payrollStatusText(row) === "Cần xem lại vị trí" ? (
                 <div className="inline-actions">
-                  <Chip tone="warning">Cần xử lý GPS · {fmtMoney(row.blocked_amount)}</Chip>
+                  <Chip tone="warning">Cần xem lại vị trí · {fmtMoney(row.blocked_amount)}</Chip>
                   <Button tone="secondary" onClick={(event) => { event.stopPropagation(); onOpenReviewGps?.(); }}>Xem</Button>
                 </div>
               ) : payrollStatusText(row) === "Đã trả hết" ? (
@@ -135,7 +135,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
             </div>
             <div className="mini-grid">
               <Metric label="Chờ duyệt" value={fmtMoney(row.pending_amount)} tone={row.pending_amount ? "warning" : "neutral"} />
-              <Metric label="Cần xử lý GPS" value={fmtMoney(row.blocked_amount)} tone={row.blocked_amount ? "warning" : "neutral"} />
+              <Metric label="Cần xem lại vị trí" value={fmtMoney(row.blocked_amount)} tone={row.blocked_amount ? "warning" : "neutral"} />
               <Metric label="Đã trả hôm nay" value={fmtMoney(row.paid_amount)} />
             </div>
             {row.pending_reasons.filter((reason) => reason !== "open_session").map((reason) => <p key={reason} className="muted">{pendingText(reason as PayrollSummary["pending_reason"])}</p>)}

@@ -24,7 +24,7 @@ describe("gps-label", () => {
       flag_source: "check_out",
       check_in_accuracy_m: 20,
       check_out_accuracy_m: 130,
-    })).toBe("Sai số GPS lớn (±130 m)");
+    })).toBe("Sai số vị trí lớn (±130 m)");
   });
 
   it("returns in-workshop text when there is no GPS flag", () => {

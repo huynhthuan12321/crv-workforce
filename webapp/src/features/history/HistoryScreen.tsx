@@ -9,7 +9,7 @@ import type {History, HistorySession} from "../../types/api";
 const reasonLabels: Record<string, string> = {
   dang_mo: "Đang mở",
   cho_xu_ly: "Chờ xử lý",
-  co_co_gps: "Có cờ GPS chưa xử lý",
+  co_co_gps: "Có vị trí cần quản lý xem lại",
   cho_duyet: "Chờ duyệt",
 };
 

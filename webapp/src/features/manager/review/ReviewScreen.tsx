@@ -81,7 +81,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
       <div className="segmented">
         {(["all", "gps", "forgot"] as const).map((key) => (
           <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>
-            {key === "all" ? `Tất cả (${pending.length})` : key === "gps" ? `GPS (${gpsCount})` : `Quên ra ca (${forgotCount})`}
+            {key === "all" ? `Tất cả (${pending.length})` : key === "gps" ? `Vị trí (${gpsCount})` : `Quên ra ca (${forgotCount})`}
           </button>
         ))}
       </div>
@@ -99,7 +99,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
                 <b>{row.employee_name}</b>
                 <small>{row.employee_code} · Vào ca {fmtTime(row.check_in_at)}</small>
               </div>
-              <Chip tone={type === "gps" ? "warning" : "danger"}>{type === "gps" ? "GPS" : "Quên ra ca"}</Chip>
+              <Chip tone={type === "gps" ? "warning" : "danger"}>{type === "gps" ? "Vị trí" : "Quên ra ca"}</Chip>
             </div>
             {type === "gps" ? (
               <p className="muted">{gpsLabel(row)}</p>
@@ -109,7 +109,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
             {mode === "pending" && type === "gps" && <Button onClick={() => void markFlags(row)}>Đã xem</Button>}
             {mode === "pending" && type === "forgot" && <Button onClick={() => setSelected(row)}>Xử lý phiên</Button>}
             {mode === "resolved" && (
-              <p className="muted">Đã xử lý bởi {row.resolved_by_name || "—"} lúc {fmtTime(row.resolved_at)} · {row.resolved_action === "flags_reviewed" ? "Đã xem GPS" : "Đóng phiên quên"}</p>
+              <p className="muted">Đã xử lý bởi {row.resolved_by_name || "—"} lúc {fmtTime(row.resolved_at)} · {row.resolved_action === "flags_reviewed" ? "Đã xem vị trí" : "Đóng phiên quên"}</p>
             )}
             {mode === "resolved" && row.reason && <p className="muted">Lý do: {row.reason}</p>}
           </Card>
