@@ -6,6 +6,11 @@ import {
   mockEmployees,
   mockHistory,
   mockManager,
+  mockDirector,
+  mockReportEmployees,
+  mockReportProducts,
+  mockReportSeries,
+  mockReportSummary,
   mockPayroll,
   mockPayrollADetail,
   mockReviewPending,
@@ -32,6 +37,9 @@ class MockApi {
     if (this.scenario === "locked") throw new ApiError("ACCOUNT_LOCKED", "Tài khoản đã bị khóa", 403);
     if (this.scenario === "expired") throw new ApiError("INITDATA_EXPIRED", "Phiên đăng nhập hết hạn", 401);
     if (this.scenario === "network") throw new ApiError("NETWORK_ERROR", "Không thể kết nối máy chủ", 502);
+    if (this.scenario.startsWith("director_")) {
+      return {token: "mock-token", employee: mockDirector};
+    }
     if (this.scenario.startsWith("manager_")) {
       return {token: "mock-token", employee: mockManager};
     }
@@ -55,6 +63,13 @@ class MockApi {
       return outputForScenario(this.scenario, sessionId) as OutputForm as T;
     }
     if (path === "/history") return mockHistory as History as T;
+    if (path.startsWith("/reports/employees")) return mockReportEmployees as T;
+    if (path.startsWith("/reports/summary")) {
+      if (this.scenario === "director_report_empty") return {...mockReportSummary, minutes: 0, paid: 0, pending: 0, total: 0, bags: 0, kg: 0, salary: {paid: 0, pending: 0, total: 0}} as T;
+      return mockReportSummary as T;
+    }
+    if (path.startsWith("/reports/products")) return mockReportProducts as T;
+    if (path.startsWith("/reports/timeseries")) return (this.scenario === "director_report_day" ? [mockReportSeries[0]] : mockReportSeries) as T;
     if (path === "/working-now") {
       return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
     }

@@ -11,7 +11,8 @@ let mockApiPromise: Promise<MockApi> | null = null;
 
 async function getMockApi() {
   if (!mockApiPromise) {
-    mockApiPromise = import("../mock/mock-api").then((module) => module.mockApi);
+    const modulePath = "/src/mock/mock-api.ts";
+    mockApiPromise = import(/* @vite-ignore */ modulePath).then((module) => module.mockApi as MockApi);
   }
   return mockApiPromise;
 }

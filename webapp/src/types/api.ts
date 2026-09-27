@@ -199,3 +199,32 @@ export type RateHistory = {
   hourly_rate: number;
   effective_from: string;
 };
+
+export type ReportEmployee = {
+  id: number;
+  code: string;
+  full_name: string;
+  is_active: boolean;
+};
+
+export type ReportSummary = {
+  from: string;
+  to: string;
+  minutes: number;
+  salary: {paid: number; pending: number; total: number};
+  paid: number;
+  pending: number;
+  total: number;
+  bags: number;
+  kg: number;
+};
+
+export type ReportTimeseries = {
+  date: string;
+  minutes: number;
+  salary: number;
+  paid: number;
+  pending: number;
+  bags: number;
+  kg: number;
+};

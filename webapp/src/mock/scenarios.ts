@@ -40,7 +40,16 @@ export type MockScenario =
   | "manager_employees"
   | "manager_employee_add"
   | "manager_employee_detail"
-  | "manager_lock_open";
+  | "manager_lock_open"
+  | "director_report_day"
+  | "director_report_week"
+  | "director_report_month"
+  | "director_report_filtered"
+  | "director_report_employees"
+  | "director_report_empty"
+  | "director_review"
+  | "director_payroll"
+  | "director_payroll_detail";
 
 export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "idle", label: "Chưa vào ca"},
@@ -71,6 +80,15 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_employee_add", label: "QL: Thêm nhân viên"},
   {key: "manager_employee_detail", label: "QL: Chi tiết + đơn giá"},
   {key: "manager_lock_open", label: "QL: Khóa đang trong ca"},
+  {key: "director_report_day", label: "GĐ: Báo cáo ngày"},
+  {key: "director_report_week", label: "GĐ: Báo cáo tuần"},
+  {key: "director_report_month", label: "GĐ: Báo cáo tháng"},
+  {key: "director_report_filtered", label: "GĐ: Đang lọc nhân viên"},
+  {key: "director_report_employees", label: "GĐ: Chọn nhân viên"},
+  {key: "director_report_empty", label: "GĐ: Báo cáo trống"},
+  {key: "director_review", label: "GĐ: Cần xử lý"},
+  {key: "director_payroll", label: "GĐ: Duyệt lương"},
+  {key: "director_payroll_detail", label: "GĐ: Chi tiết lương"},
 ];
 
 export const mockEmployee: Employee = {
@@ -89,6 +107,46 @@ export const mockManager: Employee = {
   role: "manager",
   tabs: ["working", "review", "payroll", "employees"],
   has_location_consent: true,
+};
+
+export const mockDirector: Employee = {
+  id: 11,
+  code: "GD001",
+  full_name: "Giám đốc CRV",
+  role: "director",
+  tabs: ["reports", "review", "payroll"],
+  has_location_consent: true,
+};
+
+export const mockReportEmployees = [
+  {id: 1, code: "NV001", full_name: "Nguyễn Văn A", is_active: true},
+  {id: 2, code: "NV002", full_name: "Lê Thị B", is_active: true},
+  {id: 3, code: "NV003", full_name: "Trần Văn C", is_active: true},
+  {id: 4, code: "NV004", full_name: "Phạm Thị D", is_active: true},
+];
+
+export const mockReportProducts = [
+  {code: "BOT", name: "Bột", bags: 320, kg: 384},
+  {code: "XUC_XICH", name: "Xúc xích", bags: 180, kg: 180},
+  {code: "PHO_MAI", name: "Phô mai", bags: 140, kg: 140},
+  {code: "CHA_BONG", name: "Chà bông", bags: 120, kg: 120},
+  {code: "SOT_CAM", name: "Sốt cam", bags: 90, kg: 180},
+  {code: "SOT_TRANG", name: "Sốt trắng", bags: 80, kg: 160},
+  {code: "BO", name: "Bơ", bags: 60, kg: 120},
+];
+
+export const mockReportSeries = [
+  {date: "2026-09-21", minutes: 480, salary: 392000, paid: 280000, pending: 112000, bags: 160, kg: 220},
+  {date: "2026-09-22", minutes: 510, salary: 420000, paid: 420000, pending: 0, bags: 180, kg: 240},
+  {date: "2026-09-23", minutes: 465, salary: 378000, paid: 250000, pending: 128000, bags: 140, kg: 190},
+  {date: "2026-09-24", minutes: 540, salary: 448000, paid: 448000, pending: 0, bags: 210, kg: 280},
+  {date: "2026-09-25", minutes: 495, salary: 410000, paid: 300000, pending: 110000, bags: 180, kg: 234},
+];
+
+export const mockReportSummary = {
+  from: "2026-09-21", to: "2026-09-27", minutes: 2490,
+  salary: {paid: 1698000, pending: 350000, total: 2048000},
+  paid: 1698000, pending: 350000, total: 2048000, bags: 990, kg: 1284,
 };
 
 export const mockConsent: Consent = {
