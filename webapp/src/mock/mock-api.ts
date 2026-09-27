@@ -1,6 +1,21 @@
 import {ApiError} from "../api/errors";
 import type {AuthData, Consent, History, OutputForm, Today, WorkSession} from "../types/api";
-import {mockConsent, mockEmployee, mockHistory, outputForScenario, scenarioFromUrl, todayForScenario, type MockScenario} from "./scenarios";
+import {
+  mockConsent,
+  mockEmployee,
+  mockEmployees,
+  mockHistory,
+  mockManager,
+  mockPayroll,
+  mockPayrollADetail,
+  mockReviewPending,
+  mockReviewResolved,
+  mockWorkingNow,
+  outputForScenario,
+  scenarioFromUrl,
+  todayForScenario,
+  type MockScenario,
+} from "./scenarios";
 
 class MockApi {
   scenario: MockScenario = scenarioFromUrl();
@@ -17,6 +32,9 @@ class MockApi {
     if (this.scenario === "locked") throw new ApiError("ACCOUNT_LOCKED", "Tài khoản đã bị khóa", 403);
     if (this.scenario === "expired") throw new ApiError("INITDATA_EXPIRED", "Phiên đăng nhập hết hạn", 401);
     if (this.scenario === "network") throw new ApiError("NETWORK_ERROR", "Không thể kết nối máy chủ", 502);
+    if (this.scenario.startsWith("manager_")) {
+      return {token: "mock-token", employee: mockManager};
+    }
     return {
       token: "mock-token",
       employee: {...mockEmployee, has_location_consent: this.scenario !== "consent"},
@@ -37,6 +55,42 @@ class MockApi {
       return outputForScenario(this.scenario, sessionId) as OutputForm as T;
     }
     if (path === "/history") return mockHistory as History as T;
+    if (path === "/working-now") {
+      return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
+    }
+    if (path.startsWith("/review/pending")) return mockReviewPending as T;
+    if (path.startsWith("/review/resolved")) return mockReviewResolved as T;
+    if (path.includes("/flags-reviewed") && options.method === "POST") {
+      if (this.scenario === "manager_already_handled") {
+        throw new ApiError("ALREADY_HANDLED", "Mục này đã được xử lý.", 409, {
+          handled_by_name: "Giám đốc",
+          handled_at: "2024-04-24T10:35:00+07:00",
+          action: "flags_reviewed",
+        });
+      }
+      return mockReviewPending[0] as T;
+    }
+    if (path.includes("/close") && options.method === "POST") return {...mockReviewPending[1], status: "closed"} as T;
+    if (path.startsWith("/review/") && options.method === "PATCH") return {...mockPayrollADetail.sessions[1], minutes: 323} as T;
+    if (path.startsWith("/payroll/approve") && options.method === "POST") return [
+      {employee_id: 2, batch_id: 20, batch_no: 1, amount: 224000},
+      {employee_id: 4, batch_id: 21, batch_no: 1, amount: 168000},
+    ] as T;
+    if (path.startsWith("/payroll/1")) return mockPayrollADetail as T;
+    if (path.startsWith("/payroll")) return (this.scenario === "manager_payroll_empty" ? [] : mockPayroll) as T;
+    if (path.startsWith("/employees/1/rates") && options.method === "POST") return {id: 9, hourly_rate: 32000, effective_from: "2024-04-25"} as T;
+    if (path.startsWith("/employees/1/rates")) return [
+      {id: 1, hourly_rate: 30000, effective_from: "2024-04-24"},
+      {id: 2, hourly_rate: 28000, effective_from: "2024-01-01"},
+    ] as T;
+    if (path.startsWith("/employees/1/invite") && options.method === "POST") return {...mockEmployees[0], invite_url: "https://t.me/crv_bot/app?startapp=invite-new"} as T;
+    if (path.startsWith("/employees/") && path.endsWith("/lock") && options.method === "POST") {
+      if (this.scenario === "manager_lock_open") throw new ApiError("EMPLOYEE_HAS_OPEN_SESSION", "Nhân viên đang trong ca, không thể khóa.", 409);
+      return {...mockEmployees[1], is_active: false} as T;
+    }
+    if (path.startsWith("/employees/") && path.endsWith("/unlock") && options.method === "POST") return {...mockEmployees[2], is_active: true} as T;
+    if (path === "/employees" && options.method === "POST") return {...mockEmployees[0], id: 9, code: "NV009", full_name: "Nhân viên mới", is_linked: false, invite_url: "https://t.me/crv_bot/app?startapp=invite-nv009"} as T;
+    if (path.startsWith("/employees")) return mockEmployees as T;
     if (path === "/attendance/check-in" && options.method === "POST") {
       return todayForScenario("open").open_session as WorkSession as T;
     }

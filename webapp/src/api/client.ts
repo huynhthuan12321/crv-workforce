@@ -1,4 +1,3 @@
-import {mockApi} from "../mock/mock-api";
 import type {AuthData} from "../types/api";
 import {ApiError} from "./errors";
 
@@ -7,11 +6,21 @@ const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
 
 export {ApiError};
 
+type MockApi = typeof import("../mock/mock-api").mockApi;
+let mockApiPromise: Promise<MockApi> | null = null;
+
+async function getMockApi() {
+  if (!mockApiPromise) {
+    mockApiPromise = import("../mock/mock-api").then((module) => module.mockApi);
+  }
+  return mockApiPromise;
+}
+
 class ApiClient {
   private token = sessionStorage.getItem("crv_token") || "";
 
   async login(): Promise<AuthData> {
-    if (USE_MOCK) return mockApi.login();
+    if (USE_MOCK) return (await getMockApi()).login();
     const initData = window.Telegram?.WebApp?.initData || "";
     const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     try {
@@ -47,7 +56,7 @@ class ApiClient {
     }
     const json = await this.parseJson(response);
     if (!response.ok) {
-      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status);
+      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status, json?.details);
     }
     this.token = json.data.token;
     sessionStorage.setItem("crv_token", this.token);
@@ -55,7 +64,7 @@ class ApiClient {
   }
 
   async request<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-    if (USE_MOCK) return mockApi.request<T>(path, options);
+    if (USE_MOCK) return (await getMockApi()).request<T>(path, options);
     let response: Response;
     try {
       response = await fetch(`${API_URL}${path}`, {
@@ -71,7 +80,7 @@ class ApiClient {
         await this.login();
         return this.request(path, options, false);
       }
-      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status);
+      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status, json?.details);
     }
     return json.data as T;
   }
