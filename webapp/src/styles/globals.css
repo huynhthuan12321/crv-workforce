@@ -292,6 +292,10 @@ input:disabled {
   gap: 10px;
 }
 
+.mini-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric {
   border-radius: 18px;
   background: var(--crv-card-soft);
@@ -313,6 +317,11 @@ input:disabled {
 .metric--warning {
   background: var(--crv-warning-soft);
   color: var(--crv-warning);
+}
+
+.metric--info {
+  background: var(--crv-primary-soft);
+  color: var(--crv-primary);
 }
 
 .crv-button {

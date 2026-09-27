@@ -292,8 +292,12 @@ class AttendanceService:
             raw += Decimal(running_minutes) * Decimal(opened.rate_snapshot) / Decimal(60)
         paid = await self.session.scalar(select(func.coalesce(func.sum(PayBatchOrm.amount), 0)).where(
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
+        can_check_in = opened is None and now.time() < settings.rules.checkin_cutoff
         return {"open_session": session_dict(opened) if opened else None,
-                "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0)}
+                "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0),
+                "server_now": iso_vn(now),
+                "checkin_cutoff": settings.rules.checkin_cutoff.strftime("%H:%M"),
+                "can_check_in": can_check_in}
 
 
 class WorkingService:
@@ -321,6 +325,7 @@ class WorkingService:
                 "check_in_distance_m": float(row.check_in_distance_m) if row.check_in_distance_m is not None else None,
                 "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
                 "is_outside": "gps_out_of_range" in (row.flags or []),
+                "server_now": iso_vn(now),
             })
         return result
 
@@ -343,6 +348,7 @@ class OutputService:
         return {"session_id": session_id, "locked": now >= locked_at,
                 "seconds_remaining": max(0, int((locked_at - now).total_seconds())),
                 "locked_at": iso_vn(output.locked_at),
+                "server_now": iso_vn(now),
                 "items": [{"code": p.code, "name": p.name, "kg_per_bag": float(p.kg_per_bag),
                            "bags": items[p.id].bags if p.id in items else 0} for p in products]}
 
@@ -813,18 +819,39 @@ class ReportService:
         result: dict[date, dict[str, int]] = {}
         current = start
         while current <= end:
-            result[current] = {"paid": 0, "pending": 0, "total": 0}
+            result[current] = {
+                "paid": 0,
+                "pending": 0,
+                "pending_eligible": 0,
+                "pending_blocked": 0,
+                "needs_review_count": 0,
+                "total": 0,
+            }
+            payroll = PayrollService(self.session)
             for emp_id in employees:
                 paid = int(await self.session.scalar(select(func.coalesce(func.sum(PayBatchOrm.amount), 0)).where(
                     PayBatchOrm.employee_id == emp_id, PayBatchOrm.work_date == current)) or 0)
-                raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(
+                employee = await self.session.get(EmployeeOrm, emp_id)
+                pending_eligible = 0
+                if employee:
+                    pending_eligible = int((await payroll._payroll_summary(employee, current))["pending_amount"])
+                all_closed_raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(
                     WorkSessionOrm.employee_id == emp_id,
                     WorkSessionOrm.work_date == current,
                     WorkSessionOrm.status == SessionStatus.closed,
                 )) or 0)
-                pending = max(0, ceil_money(raw) - paid) if raw else 0
+                all_closed_rounded = ceil_money(all_closed_raw) if all_closed_raw else 0
+                pending_blocked = max(0, all_closed_rounded - paid - pending_eligible)
+                needs_review_count = int(await self.session.scalar(select(func.count()).select_from(WorkSessionOrm).where(
+                    WorkSessionOrm.employee_id == emp_id,
+                    WorkSessionOrm.work_date == current,
+                    WorkSessionOrm.status == SessionStatus.needs_review,
+                )) or 0)
                 result[current]["paid"] += paid
-                result[current]["pending"] += pending
+                result[current]["pending_eligible"] += pending_eligible
+                result[current]["pending_blocked"] += pending_blocked
+                result[current]["needs_review_count"] += needs_review_count
+                result[current]["pending"] += pending_eligible + pending_blocked
             result[current]["total"] = result[current]["paid"] + result[current]["pending"]
             current += timedelta(days=1)
         return result
@@ -841,9 +868,16 @@ class ReportService:
         salary_days = await self._salary_for_days(start, end, employee_id)
         paid = sum(x["paid"] for x in salary_days.values())
         pending = sum(x["pending"] for x in salary_days.values())
+        pending_eligible = sum(x["pending_eligible"] for x in salary_days.values())
+        pending_blocked = sum(x["pending_blocked"] for x in salary_days.values())
+        needs_review_count = sum(x["needs_review_count"] for x in salary_days.values())
         return {"from": start, "to": end, "minutes": minutes,
-                "salary": {"paid": paid, "pending": pending, "total": paid + pending},
-                "paid": paid, "pending": pending, "total": paid + pending,
+                "salary": {"paid": paid, "pending": pending, "pending_eligible": pending_eligible,
+                           "pending_blocked": pending_blocked, "needs_review_count": needs_review_count,
+                           "total": paid + pending},
+                "paid": paid, "pending": pending, "pending_eligible": pending_eligible,
+                "pending_blocked": pending_blocked, "needs_review_count": needs_review_count,
+                "total": paid + pending,
                 "bags": int(production[0]), "kg": float(production[1])}
 
     async def products(self, period: str, day: date, employee_id: int | None = None) -> list[dict]:
@@ -877,6 +911,9 @@ class ReportService:
             salary = salary_days[current]
             rows.append({"date": current, "minutes": minutes, "salary": salary["total"],
                          "paid": salary["paid"], "pending": salary["pending"],
+                         "pending_eligible": salary["pending_eligible"],
+                         "pending_blocked": salary["pending_blocked"],
+                         "needs_review_count": salary["needs_review_count"],
                          "bags": int(bags), "kg": float(kg)})
             current += timedelta(days=1)
         return rows

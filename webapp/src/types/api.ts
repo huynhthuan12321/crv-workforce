@@ -45,6 +45,9 @@ export type Today = {
   open_session: WorkSession | null;
   estimated_day_amount: number;
   paid_today: number;
+  server_now: string;
+  checkin_cutoff: string;
+  can_check_in: boolean;
 };
 
 export type Consent = {
@@ -73,6 +76,7 @@ export type OutputForm = {
   locked: boolean;
   seconds_remaining: number;
   locked_at: string;
+  server_now: string;
   items: OutputItem[];
 };
 
@@ -131,6 +135,7 @@ export type WorkingNowItem = {
   check_in_distance_m: number | null;
   check_in_accuracy_m: number | null;
   is_outside: boolean;
+  server_now: string;
 };
 
 export type ReviewItem = WorkSession & {
@@ -211,9 +216,12 @@ export type ReportSummary = {
   from: string;
   to: string;
   minutes: number;
-  salary: {paid: number; pending: number; total: number};
+  salary: {paid: number; pending: number; pending_eligible: number; pending_blocked: number; needs_review_count: number; total: number};
   paid: number;
   pending: number;
+  pending_eligible: number;
+  pending_blocked: number;
+  needs_review_count: number;
   total: number;
   bags: number;
   kg: number;
@@ -225,6 +233,9 @@ export type ReportTimeseries = {
   salary: number;
   paid: number;
   pending: number;
+  pending_eligible: number;
+  pending_blocked: number;
+  needs_review_count: number;
   bags: number;
   kg: number;
 };

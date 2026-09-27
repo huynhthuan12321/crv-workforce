@@ -61,6 +61,9 @@ class TodayOut(BaseModel):
     open_session: WorkSessionOut | None
     estimated_day_amount: int = Field(description="VND")
     paid_today: int = Field(description="VND")
+    server_now: str
+    checkin_cutoff: str
+    can_check_in: bool
 
 
 class EmployeeOut(BaseModel):
@@ -86,6 +89,7 @@ class WorkingNowOut(BaseModel):
     check_in_distance_m: float | None = None
     check_in_accuracy_m: float | None = None
     is_outside: bool = False
+    server_now: str
 
 
 class PayBatchOut(BaseModel):
@@ -144,6 +148,9 @@ class ReportSummaryOut(BaseModel):
     salary: dict[str, int]
     paid: int
     pending: int
+    pending_eligible: int
+    pending_blocked: int
+    needs_review_count: int
     total: int
     bags: int
     kg: float
@@ -155,6 +162,9 @@ class ReportTimeseriesOut(BaseModel):
     salary: int
     paid: int
     pending: int
+    pending_eligible: int
+    pending_blocked: int
+    needs_review_count: int
     bags: int
     kg: float
 

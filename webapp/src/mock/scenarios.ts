@@ -136,19 +136,19 @@ export const mockReportProducts = [
 ];
 
 export const mockReportSeries = [
-  {date: "2026-09-21", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
-  {date: "2026-09-22", minutes: 510, salary: 420000, paid: 420000, pending: 0, bags: 180, kg: 240},
-  {date: "2026-09-23", minutes: 465, salary: 378000, paid: 250000, pending: 128000, bags: 140, kg: 190},
-  {date: "2026-09-24", minutes: 540, salary: 448000, paid: 448000, pending: 0, bags: 210, kg: 280},
-  {date: "2026-09-25", minutes: 495, salary: 410000, paid: 300000, pending: 110000, bags: 180, kg: 234},
-  {date: "2026-09-26", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
-  {date: "2026-09-27", minutes: 0, salary: 0, paid: 0, pending: 0, bags: 0, kg: 0},
+  {date: "2026-09-21", minutes: 0, salary: 0, paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, bags: 0, kg: 0},
+  {date: "2026-09-22", minutes: 510, salary: 420000, paid: 420000, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, bags: 180, kg: 240},
+  {date: "2026-09-23", minutes: 465, salary: 378000, paid: 250000, pending: 128000, pending_eligible: 100000, pending_blocked: 28000, needs_review_count: 1, bags: 140, kg: 190},
+  {date: "2026-09-24", minutes: 540, salary: 448000, paid: 448000, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, bags: 210, kg: 280},
+  {date: "2026-09-25", minutes: 495, salary: 410000, paid: 300000, pending: 110000, pending_eligible: 80000, pending_blocked: 30000, needs_review_count: 1, bags: 180, kg: 234},
+  {date: "2026-09-26", minutes: 0, salary: 0, paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, bags: 0, kg: 0},
+  {date: "2026-09-27", minutes: 0, salary: 0, paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, bags: 0, kg: 0},
 ];
 
 export const mockReportSummary = {
   from: "2026-09-21", to: "2026-09-27", minutes: 2490,
-  salary: {paid: 1698000, pending: 350000, total: 2048000},
-  paid: 1698000, pending: 350000, total: 2048000, bags: 990, kg: 1284,
+  salary: {paid: 1698000, pending: 350000, pending_eligible: 180000, pending_blocked: 170000, needs_review_count: 2, total: 2048000},
+  paid: 1698000, pending: 350000, pending_eligible: 180000, pending_blocked: 170000, needs_review_count: 2, total: 2048000, bags: 990, kg: 1284,
 };
 
 export const mockConsent: Consent = {
@@ -207,13 +207,14 @@ export function scenarioFromUrl(): MockScenario {
 }
 
 export function todayForScenario(scenario: MockScenario): Today {
+  const meta = {server_now: "2024-04-24T09:40:15+07:00", checkin_cutoff: "18:00", can_check_in: scenario !== "after_cutoff"};
   if (scenario === "open" || scenario === "locating") {
-    return {open_session: openSession, estimated_day_amount: 104000, paid_today: 0};
+    return {open_session: openSession, estimated_day_amount: 104000, paid_today: 0, ...meta};
   }
   if (scenario === "open_far") {
-    return {open_session: {...openSession, flags: ["gps_out_of_range"], check_in_distance_m: 250}, estimated_day_amount: 68000, paid_today: 0};
+    return {open_session: {...openSession, flags: ["gps_out_of_range"], check_in_distance_m: 250}, estimated_day_amount: 68000, paid_today: 0, ...meta};
   }
-  return {open_session: null, estimated_day_amount: 0, paid_today: 0};
+  return {open_session: null, estimated_day_amount: 0, paid_today: 0, ...meta};
 }
 
 export function outputForScenario(scenario: MockScenario, sessionId = 102): OutputForm {
@@ -222,6 +223,7 @@ export function outputForScenario(scenario: MockScenario, sessionId = 102): Outp
     locked: scenario === "output_locked",
     seconds_remaining: scenario === "output_locked" ? 0 : 572,
     locked_at: scenario === "output_locked" ? "2024-04-24T11:45:00+07:00" : new Date(Date.now() + 572000).toISOString(),
+    server_now: scenario === "output_locked" ? "2024-04-24T11:46:00+07:00" : new Date().toISOString(),
     items: mockProducts,
   };
 }
@@ -262,10 +264,10 @@ export const mockHistory: History = {
 };
 
 export const mockWorkingNow: WorkingNowItem[] = [
-  {session_id: 101, employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", check_in_at: "2024-04-24T06:12:00+07:00", minutes_worked: 208, flags: [], check_in_distance_m: 12, check_in_accuracy_m: 15, is_outside: false},
-  {session_id: 201, employee_id: 2, code: "NV002", full_name: "Lê Thị B", check_in_at: "2024-04-24T07:55:00+07:00", minutes_worked: 125, flags: [], check_in_distance_m: 22, check_in_accuracy_m: 20, is_outside: false},
-  {session_id: 301, employee_id: 3, code: "NV003", full_name: "Trần Văn C", check_in_at: "2024-04-24T08:10:00+07:00", minutes_worked: 45, flags: ["gps_out_of_range"], check_in_distance_m: 150, check_in_accuracy_m: 35, is_outside: true},
-  {session_id: 401, employee_id: 4, code: "NV004", full_name: "Phạm Thị D", check_in_at: "2024-04-24T09:20:00+07:00", minutes_worked: 45, flags: [], check_in_distance_m: 14, check_in_accuracy_m: 18, is_outside: false},
+  {session_id: 101, employee_id: 1, code: "NV001", full_name: "Nguyễn Văn A", check_in_at: "2024-04-24T06:12:00+07:00", minutes_worked: 208, flags: [], check_in_distance_m: 12, check_in_accuracy_m: 15, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
+  {session_id: 201, employee_id: 2, code: "NV002", full_name: "Lê Thị B", check_in_at: "2024-04-24T07:55:00+07:00", minutes_worked: 125, flags: [], check_in_distance_m: 22, check_in_accuracy_m: 20, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
+  {session_id: 301, employee_id: 3, code: "NV003", full_name: "Trần Văn C", check_in_at: "2024-04-24T08:10:00+07:00", minutes_worked: 45, flags: ["gps_out_of_range"], check_in_distance_m: 150, check_in_accuracy_m: 35, is_outside: true, server_now: "2024-04-24T09:40:15+07:00"},
+  {session_id: 401, employee_id: 4, code: "NV004", full_name: "Phạm Thị D", check_in_at: "2024-04-24T09:20:00+07:00", minutes_worked: 45, flags: [], check_in_distance_m: 14, check_in_accuracy_m: 18, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
 ];
 
 export const mockReviewPending: ReviewItem[] = [

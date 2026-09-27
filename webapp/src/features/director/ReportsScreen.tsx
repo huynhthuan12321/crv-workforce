@@ -87,7 +87,16 @@ export function ReportsScreen() {
     <div className="report-period-nav"><button onClick={() => setDate(shiftPeriod(period, date, -1))}>‹</button><b>{periodLabel(period, date)}</b><button disabled={!canNext} onClick={() => setDate(shiftPeriod(period, date, 1))}>›</button></div>
     <button className="filter-chip" onClick={() => setPicker(true)}>{employee ? `${employee.code} · ${employee.full_name} ✕` : "Tất cả nhân viên"}</button>
     <div className="mini-grid"><Metric label="Giờ công" value={fmtHours(summary.minutes)} /><Metric label="Tổng túi" value={summary.bags.toLocaleString("vi-VN")} /><Metric label="Tổng kg" value={fmtKg(summary.kg)} /></div>
-    <Card><SectionTitle title="Lương" /><div className="salary-total"><Metric label="Tổng" value={fmtMoney(summary.total)} /></div><div className="mini-grid"><Metric label="Đã trả" value={fmtMoney(summary.paid)} tone="success" /><Metric label="Tạm tính" value={fmtMoney(summary.pending)} tone="warning" /></div></Card>
+    <Card>
+      <SectionTitle title="Lương" />
+      <div className="salary-total"><Metric label="Tổng" value={fmtMoney(summary.total)} /></div>
+      <div className="mini-grid mini-grid--three">
+        <Metric label="Đã trả" value={fmtMoney(summary.paid)} tone="success" />
+        <Metric label="Chờ duyệt" value={fmtMoney(summary.pending_eligible)} tone="warning" />
+        <Metric label="Cần xử lý" value={fmtMoney(summary.pending_blocked)} tone="info" />
+      </div>
+      {summary.needs_review_count > 0 && <p className="muted">{summary.needs_review_count} phiên quên ra ca chưa có giờ ra.</p>}
+    </Card>
     <Card><SectionTitle title="Biểu đồ theo ngày" /><ReportChart rows={series} /></Card>
     <Card><SectionTitle title="Sản lượng theo mặt hàng" /><div className="product-table"><div className="product-table__head"><span>Mặt hàng</span><span>Túi</span><span>Kg</span></div>{products.map((row) => <div className="product-table__row" key={row.code}><span>{row.name}</span><span>{row.bags}</span><span>{row.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</span></div>)}<div className="product-table__row product-table__total"><b>Tổng</b><b>{total.bags}</b><b>{total.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</b></div></div></Card>
   </div>;

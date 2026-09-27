@@ -65,7 +65,7 @@ class MockApi {
     if (path === "/history") return mockHistory as History as T;
     if (path.startsWith("/reports/employees")) return mockReportEmployees as T;
     if (path.startsWith("/reports/summary")) {
-      if (this.scenario === "director_report_empty") return {...mockReportSummary, minutes: 0, paid: 0, pending: 0, total: 0, bags: 0, kg: 0, salary: {paid: 0, pending: 0, total: 0}} as T;
+      if (this.scenario === "director_report_empty") return {...mockReportSummary, minutes: 0, paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, total: 0, bags: 0, kg: 0, salary: {paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, total: 0}} as T;
       return mockReportSummary as T;
     }
     if (path.startsWith("/reports/products")) return mockReportProducts as T;
