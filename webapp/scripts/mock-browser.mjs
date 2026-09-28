@@ -46,6 +46,7 @@ export const managerScenarios = [
   ["manager_employee_assign", "employees", "15_doi_kho"],
   ["manager_employee_assign_open", "employees", "16_doi_kho_dang_trong_ca"],
   ["manager_locations", "employees", "17_danh_sach_kho"],
+  ["manager_locations_in_use", "employees", "17b_ngung_dung_bi_chan"],
   ["manager_lock_open", "employees", "18_khoa_dang_trong_ca"],
 ];
 

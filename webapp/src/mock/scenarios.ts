@@ -46,6 +46,7 @@ export type MockScenario =
   | "manager_employee_assign"
   | "manager_employee_assign_open"
   | "manager_locations"
+  | "manager_locations_in_use"
   | "manager_lock_open"
   | "director_report_day"
   | "director_report_week"
@@ -90,6 +91,7 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_employee_assign", label: "QL: Đổi kho"},
   {key: "manager_employee_assign_open", label: "QL: Đổi kho khi đang trong ca"},
   {key: "manager_locations", label: "QL: Kho"},
+  {key: "manager_locations_in_use", label: "QL: Kho bị chặn ngừng dùng"},
   {key: "manager_lock_open", label: "QL: Khóa đang trong ca"},
   {key: "director_report_day", label: "GĐ: Báo cáo ngày"},
   {key: "director_report_week", label: "GĐ: Báo cáo tuần"},

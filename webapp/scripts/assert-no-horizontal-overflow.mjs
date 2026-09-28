@@ -54,6 +54,42 @@ try {
       }
     }
   }
+
+  for (const width of widths) {
+    const page = await browser.newPage();
+    await page.setViewport({width, height: 844, deviceScaleFactor: 1, isMobile: true});
+    await page.goto(`${baseUrl}/?scenario=manager_employee_assign&tab=employees&theme=light`, {waitUntil: "domcontentloaded", timeout: 15000});
+    await page.waitForSelector(".app-shell", {timeout: 10000});
+    await page.waitForSelector("textarea", {timeout: 10000});
+    await page.setViewport({width, height: 400, deviceScaleFactor: 1, isMobile: true});
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty("--tg-viewport-height", "400px");
+    });
+    await page.focus("textarea");
+    await page.evaluate(() => document.body.classList.add("keyboard-open"));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const keyboardResult = await page.evaluate(() => {
+      const focused = document.activeElement;
+      const submit = Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Xác nhận") || button.textContent?.includes("XÃ¡c nháº­n"));
+      const tabBar = document.querySelector(".bottom-tabs");
+      const focusedRect = focused instanceof HTMLElement ? focused.getBoundingClientRect() : null;
+      const submitRect = submit instanceof HTMLElement ? submit.getBoundingClientRect() : null;
+      const tabStyle = tabBar ? window.getComputedStyle(tabBar) : null;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      return {
+        focusedVisible: Boolean(focusedRect && focusedRect.top >= 0 && focusedRect.bottom <= viewportHeight),
+        submitVisible: Boolean(submitRect && submitRect.top >= 0 && submitRect.bottom <= viewportHeight),
+        tabHidden: !tabStyle || tabStyle.visibility === "hidden" || tabStyle.pointerEvents === "none",
+        focusedRect: focusedRect ? `${Math.round(focusedRect.top)}-${Math.round(focusedRect.bottom)}` : "none",
+        submitRect: submitRect ? `${Math.round(submitRect.top)}-${Math.round(submitRect.bottom)}` : "none",
+      };
+    });
+    await page.close();
+    if (!keyboardResult.focusedVisible || !keyboardResult.submitVisible || !keyboardResult.tabHidden) {
+      failures.push(`${width}px keyboard: focused=${keyboardResult.focusedVisible} ${keyboardResult.focusedRect}, submit=${keyboardResult.submitVisible} ${keyboardResult.submitRect}, tabHidden=${keyboardResult.tabHidden}`);
+    }
+  }
 } finally {
   await browser.close();
 }

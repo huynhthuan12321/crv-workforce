@@ -29,6 +29,22 @@ function displayLocationReason(reason?: string | null) {
   return reason.trim().toLowerCase() === "backfill kho01" ? "Kho ban đầu" : reason;
 }
 
+type LocationUseDetails = {current_assignments?: unknown; open_sessions?: unknown};
+
+function detailCount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.length;
+  return 0;
+}
+
+export function formatLocationInUseMessage(locationName: string, details?: LocationUseDetails | null) {
+  const assignments = detailCount(details?.current_assignments);
+  const openSessions = detailCount(details?.open_sessions);
+  const parts = [`còn ${assignments} nhân viên đang phân công`];
+  if (openSessions > 0) parts.push(`${openSessions} ca đang mở`);
+  return `Không thể ngừng dùng ${locationName}: ${parts.join(", ")}. Chuyển nhân viên sang kho khác trước.`;
+}
+
 export function EmployeesScreen() {
   const scenario = mockScenario();
   const [rows, setRows] = useState<ManagedEmployee[]>([]);
@@ -36,7 +52,7 @@ export function EmployeesScreen() {
   const [active, setActive] = useState<"all" | "active" | "locked">("all");
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
   const [locations, setLocations] = useState<WorkLocation[]>([]);
-  const [subtab, setSubtab] = useState<"employees" | "locations">(scenario === mockKey("manager", "locations") ? "locations" : "employees");
+  const [subtab, setSubtab] = useState<"employees" | "locations">(scenario.startsWith(mockKey("manager", "locations")) ? "locations" : "employees");
   const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario.startsWith(mockKey("manager", "employee", "assign")) || scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
   const [selected, setSelected] = useState<ManagedEmployee | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
@@ -149,6 +165,7 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
   const [needConfirm, setNeedConfirm] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [locationErrors, setLocationErrors] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [expandedLocation, setExpandedLocation] = useState<number | null>(null);
   const canSaveLocation = form.code.trim().length > 0 && form.name.trim().length > 0;
@@ -223,10 +240,19 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
 
   const toggle = async (row: WorkLocation) => {
     try {
+      setLocationErrors((current) => ({...current, [row.id]: ""}));
       await api.post<WorkLocation>(`/locations/${row.id}/${row.is_active ? "deactivate" : "activate"}`);
       await load();
     } catch (err) {
-      setError(errorText(err));
+      hapticNotify("error");
+      if (err instanceof ApiError && err.code === "LOCATION_IN_USE") {
+        setLocationErrors((current) => ({
+          ...current,
+          [row.id]: formatLocationInUseMessage(row.name, err.details as LocationUseDetails | undefined),
+        }));
+        return;
+      }
+      setLocationErrors((current) => ({...current, [row.id]: errorText(err)}));
     }
   };
 
@@ -270,6 +296,12 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
         <Button tone="secondary" onClick={() => void toggle(row)}>{row.is_active ? "Ngừng dùng" : "Dùng lại"}</Button>
         <Button tone="secondary" onClick={() => setExpandedLocation(expandedLocation === row.id ? null : row.id)}>Danh sách nhân viên</Button>
       </div>
+      {locationErrors[row.id] && (
+        <div className="form-error">
+          <p>{locationErrors[row.id]}</p>
+          <Button tone="secondary" className="small-button" onClick={() => setExpandedLocation(row.id)}>Xem nhân viên</Button>
+        </div>
+      )}
       {expandedLocation === row.id && (
         <div className="history-block">
           {(row.current_employees ?? []).length === 0

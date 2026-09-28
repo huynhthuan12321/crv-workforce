@@ -81,7 +81,16 @@ class MockApi {
     }
     if (path.startsWith("/locations") && options.method === "PATCH") return mockLocations[0] as T;
     if (path === "/locations" && options.method === "POST") return {...mockLocations[1], id: 9} as T;
-    if (path.includes("/deactivate") || path.includes("/activate")) return mockLocations[0] as T;
+    if (path.includes("/deactivate")) {
+      if (this.scenario === "manager_locations_in_use") {
+        throw new ApiError("LOCATION_IN_USE", "Kho đang được sử dụng.", 409, {
+          current_assignments: [{id: 1}, {id: 3}],
+          open_sessions: [{id: 101}],
+        });
+      }
+      return mockLocations[0] as T;
+    }
+    if (path.includes("/activate")) return mockLocations[0] as T;
     if (path.startsWith("/locations")) return mockLocations as T;
     if (path.startsWith("/working-now")) {
       return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
