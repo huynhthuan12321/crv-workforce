@@ -544,10 +544,13 @@ class ReviewService:
 
     async def _review_item(self, row: WorkSessionOrm) -> dict:
         employee = await self.session.get(EmployeeOrm, row.employee_id)
+        nearby = await self.session.get(WorkLocationOrm, row.nearby_location_id) if row.nearby_location_id else None
         return session_dict(row) | {
             "employee_code": employee.code if employee else "",
             "employee_name": employee.full_name if employee else "",
             "review_reason": row.review_reason,
+            "nearby_location_name": nearby.name if nearby else None,
+            "nearby_location_code": nearby.code if nearby else None,
         }
 
     async def _handled_details(self, row: WorkSessionOrm | None) -> dict:
@@ -833,7 +836,17 @@ class PayrollService:
         needs_review = [row.id for row in all_sessions if row.status == SessionStatus.needs_review]
         has_open = any(row.status == SessionStatus.open for row in all_sessions)
         location_ids = sorted({row.work_location_id for row in all_sessions if row.work_location_id is not None})
-        location_names = sorted({row.location_name_snapshot for row in all_sessions if row.location_name_snapshot})
+        day_locations_map = {
+            row.work_location_id: {
+                "id": row.work_location_id,
+                "code": row.location_code_snapshot,
+                "name": row.location_name_snapshot,
+            }
+            for row in all_sessions
+            if row.work_location_id is not None
+        }
+        day_locations = [day_locations_map[key] for key in sorted(day_locations_map)]
+        location_names = [row["name"] for row in day_locations if row.get("name")]
         pending_reasons = []
         if unreviewed:
             pending_reasons.append("unreviewed_gps")
@@ -864,6 +877,7 @@ class PayrollService:
             "pending_reasons": pending_reasons,
             "work_location_ids": location_ids,
             "work_location_names": location_names,
+            "day_locations": day_locations,
             "has_multiple_locations": len(location_ids) > 1,
         }
 

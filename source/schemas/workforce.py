@@ -167,6 +167,7 @@ class PayrollSummaryOut(BaseModel):
     pending_reasons: list[str] = []
     work_location_ids: list[int] = []
     work_location_names: list[str] = []
+    day_locations: list[dict] = []
     has_multiple_locations: bool = False
 
 

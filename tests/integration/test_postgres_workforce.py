@@ -1,9 +1,12 @@
 import os
 import asyncio
+import subprocess
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.engine import make_url
 from sqlalchemy import func, select, update
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -303,9 +306,11 @@ async def test_bot_advisory_lock_autocommit_idle(pg_factory):
 
 async def add_rate_and_consent(session, employee: EmployeeOrm):
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=date(2026, 4, 1)))
-    text_row = ConsentTextOrm(version=1, content="consent", effective_at=dt(6))
-    session.add(text_row)
-    await session.flush()
+    text_row = await session.get(ConsentTextOrm, 1)
+    if not text_row:
+        text_row = ConsentTextOrm(version=1, content="consent", effective_at=dt(6))
+        session.add(text_row)
+        await session.flush()
     session.add(LocationConsentOrm(employee_id=employee.id, consent_version=1, consented_at=dt(6)))
     await session.flush()
 
@@ -460,6 +465,10 @@ async def test_2_17_s6_payroll_filters_location_without_changing_rounding_unit_a
             assert batch.amount == 162_000
             summary_a = await ReportService(session).summary("day", date(2026, 4, 24), location_id=kho1_id)
             summary_b = await ReportService(session).summary("day", date(2026, 4, 24), location_id=kho2_id)
+            assert row["day_locations"] == [
+                {"id": kho1_id, "code": "KHO01", "name": "Kho 01"},
+                {"id": kho2_id, "code": "KHO02", "name": "Kho 02"},
+            ]
             assert summary_a["salary"]["total"] == 96_500
             assert summary_b["salary"]["total"] == 65_000
 
@@ -491,3 +500,205 @@ async def test_2_17_s10_outbox_event_keeps_event_id_and_schema_version(pg_factor
             assert same.payload["schema_version"] == 2
             assert same.payload["event_id"] == event_id
             assert same.payload["session"]["location"]["code"] == "KHO01"
+
+
+async def _assert_no_open_session_on_inactive_location(factory):
+    async with factory() as session:
+        rows = (await session.execute(text("""
+            SELECT ws.id
+            FROM work_sessions ws
+            JOIN work_locations wl ON wl.id = ws.work_location_id
+            WHERE ws.status = 'open' AND wl.is_active = false
+        """))).all()
+        assert rows == []
+
+
+async def test_2_17_s5_assign_vs_checkin(pg_factory):
+    for idx in range(5):
+        async with pg_factory() as session:
+            async with session.begin():
+                manager = await make_employee(session, f"QLA{idx}", EmployeeRole.manager)
+                employee = await make_employee(session, f"NVA{idx}")
+                await add_rate_and_consent(session, employee)
+                kho2 = await make_location(session, f"KB{idx}", f"Kho B {idx}", lng=Decimal("106.0100000"))
+                manager_id, employee_id, kho2_id = manager.id, employee.id, kho2.id
+
+        async def checkin_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        employee = await session.get(EmployeeOrm, employee_id)
+                        return await AttendanceService(session, FakeClock(dt(8, idx))).check_in(employee, 10.0, 106.0, 10)
+                except WorkforceError as exc:
+                    return exc.code
+
+        async def assign_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        actor = await session.get(EmployeeOrm, manager_id)
+                        return await WorkLocationService(session, FakeClock(dt(8, idx))).assign_employee(actor, employee_id, kho2_id, "race đổi kho")
+                except WorkforceError as exc:
+                    return exc.code
+
+        results = await asyncio.gather(checkin_once(), assign_once())
+        assert not any(item == "LOCATION_INACTIVE" for item in results)
+        async with pg_factory() as session:
+            row = await session.scalar(select(WorkSessionOrm).where(WorkSessionOrm.employee_id == employee_id))
+            assert row is not None
+            assert row.work_location_id in {1, kho2_id}
+            if row.work_location_id == 1:
+                assert (row.location_code_snapshot, row.location_name_snapshot) == ("KHO01", "Kho 01")
+            else:
+                assert (row.location_code_snapshot, row.location_name_snapshot) == (f"KB{idx}", f"Kho B {idx}")
+
+
+async def test_2_17_s5_deactivate_vs_checkin(pg_factory):
+    for idx in range(5):
+        async with pg_factory() as session:
+            async with session.begin():
+                manager = await make_employee(session, f"QLD{idx}", EmployeeRole.manager)
+                employee = await make_employee(session, f"NVD{idx}")
+                await add_rate_and_consent(session, employee)
+                manager_id, employee_id = manager.id, employee.id
+
+        async def checkin_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        employee = await session.get(EmployeeOrm, employee_id)
+                        return await AttendanceService(session, FakeClock(dt(8, idx))).check_in(employee, 10.0, 106.0, 10)
+                except WorkforceError as exc:
+                    return exc.code
+
+        async def deactivate_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        actor = await session.get(EmployeeOrm, manager_id)
+                        return await WorkLocationService(session).set_active(actor, 1, False)
+                except WorkforceError as exc:
+                    return exc.code
+
+        results = await asyncio.gather(checkin_once(), deactivate_once())
+        assert any(item in {"LOCATION_IN_USE", "LOCATION_INACTIVE"} or isinstance(item, WorkSessionOrm) for item in results)
+        await _assert_no_open_session_on_inactive_location(pg_factory)
+
+
+async def test_2_17_s5_deactivate_vs_assign(pg_factory):
+    for idx in range(5):
+        async with pg_factory() as session:
+            async with session.begin():
+                manager = await make_employee(session, f"QLX{idx}", EmployeeRole.manager)
+                employee = await make_employee(session, f"NVX{idx}")
+                target = await make_location(session, f"KX{idx}", f"Kho X {idx}", lng=Decimal("106.0200000"))
+                manager_id, employee_id, target_id = manager.id, employee.id, target.id
+
+        async def assign_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        actor = await session.get(EmployeeOrm, manager_id)
+                        return await WorkLocationService(session, FakeClock(dt(8, idx))).assign_employee(actor, employee_id, target_id, "race phân công")
+                except WorkforceError as exc:
+                    return exc.code
+
+        async def deactivate_once():
+            async with pg_factory() as session:
+                try:
+                    async with session.begin():
+                        actor = await session.get(EmployeeOrm, manager_id)
+                        return await WorkLocationService(session).set_active(actor, target_id, False)
+                except WorkforceError as exc:
+                    return exc.code
+
+        await asyncio.gather(deactivate_once(), assign_once())
+        async with pg_factory() as session:
+            bad = await session.scalar(select(func.count()).select_from(EmployeeLocationAssignmentOrm)
+                .join(WorkLocationOrm, WorkLocationOrm.id == EmployeeLocationAssignmentOrm.location_id)
+                .where(EmployeeLocationAssignmentOrm.effective_to.is_(None), WorkLocationOrm.is_active.is_(False)))
+            assert bad == 0
+
+
+def _run_alembic_for_db(db_url, database: str, revision: str) -> None:
+    env = os.environ.copy()
+    env["APP__ENV"] = "development"
+    env["TG__BOT_TOKEN"] = env.get("TG__BOT_TOKEN", "test")
+    env["DB__HOST"] = db_url.host or "localhost"
+    env["DB__PORT"] = str(db_url.port or 5432)
+    env["DB__USER"] = db_url.username or "default"
+    env["DB__PASSWORD"] = db_url.password or "password"
+    env["DB__NAME"] = database
+    env["WORKSHOP__LAT"] = "10.0"
+    env["WORKSHOP__LNG"] = "106.0"
+    env["WORKSHOP__RADIUS_M"] = "100"
+    subprocess.run(["alembic", "upgrade", revision], check=True, env=env, cwd=os.getcwd(), capture_output=True, text=True)
+
+
+async def test_2_17_s9_migration_on_data_copy():
+    url = os.getenv("TEST_DATABASE_URL")
+    if not url:
+        if os.getenv("CRV_REQUIRE_POSTGRES") == "1":
+            pytest.fail("CRV_REQUIRE_POSTGRES=1 but TEST_DATABASE_URL is not set")
+        pytest.skip("TEST_DATABASE_URL is not set")
+    db_url = make_url(url)
+    db_name = f"crv_mig_217_{uuid.uuid4().hex[:10]}"
+    admin_engine = create_async_engine(db_url.set(database="postgres"), isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        async with admin_engine.begin() as conn:
+            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        _run_alembic_for_db(db_url, db_name, "0003")
+        target_engine = create_async_engine(db_url.set(database=db_name), poolclass=NullPool)
+        try:
+            async with target_engine.begin() as conn:
+                await conn.execute(text("INSERT INTO employees (code, full_name, role, is_active) VALUES ('NVOLD', 'NV Old', 'employee', true), ('QLOLD', 'QL Old', 'manager', true)"))
+                await conn.execute(text("INSERT INTO products (code, name, kg_per_bag, sort_order) VALUES ('BOT', 'Bột', 1.2, 1)"))
+                employee_id = await conn.scalar(text("SELECT id FROM employees WHERE code='NVOLD'"))
+                manager_id = await conn.scalar(text("SELECT id FROM employees WHERE code='QLOLD'"))
+                batch_id = await conn.scalar(text("""
+                    INSERT INTO pay_batches (employee_id, work_date, batch_no, amount, day_total_rounded_at_approval, status, approved_by)
+                    VALUES (:employee_id, '2026-04-24', 1, 30000, 30000, 'paid', :manager_id)
+                    RETURNING id
+                """), {"employee_id": employee_id, "manager_id": manager_id})
+                session_id = await conn.scalar(text("""
+                    INSERT INTO work_sessions (
+                        employee_id, work_date, check_in_at, check_out_at,
+                        check_in_lat, check_in_lng, check_in_accuracy_m, check_in_distance_m,
+                        check_out_lat, check_out_lng, check_out_accuracy_m, check_out_distance_m,
+                        rate_snapshot, minutes, amount_raw, status, flags, pay_batch_id, version
+                    ) VALUES
+                    (:employee_id, '2026-04-24', '2026-04-24 08:00:00+07', '2026-04-24 09:00:00+07',
+                     10.0, 106.0, 10, 0, 10.002, 106.0, 10, 222, 30000, 60, 30000, 'closed', '["gps_out_of_range"]'::jsonb, :batch_id, 1)
+                    RETURNING id
+                """), {"employee_id": employee_id, "batch_id": batch_id})
+                output_id = await conn.scalar(text("INSERT INTO output_logs (work_session_id, submitted_at, locked_at) VALUES (:session_id, now(), now()) RETURNING id"), {"session_id": session_id})
+                product_id = await conn.scalar(text("SELECT id FROM products WHERE code='BOT'"))
+                await conn.execute(text("INSERT INTO output_items (output_log_id, product_id, bags, kg) VALUES (:output_id, :product_id, 2, 2.4)"), {"output_id": output_id, "product_id": product_id})
+            async with target_engine.connect() as conn:
+                before = await conn.scalar(text("SELECT count(*) FROM work_sessions"))
+            _run_alembic_for_db(db_url, db_name, "head")
+            async with target_engine.connect() as conn:
+                after = await conn.scalar(text("SELECT count(*) FROM work_sessions"))
+                missing = await conn.scalar(text("SELECT count(*) FROM work_sessions WHERE work_location_id IS NULL OR location_code_snapshot IS NULL OR location_radius_m_snapshot IS NULL"))
+                flag_source = await conn.scalar(text("SELECT flag_source FROM work_sessions LIMIT 1"))
+                output_count = await conn.scalar(text("SELECT count(*) FROM output_items"))
+                batch_count = await conn.scalar(text("SELECT count(*) FROM pay_batches"))
+            assert before == after == 1
+            assert missing == 0
+            assert flag_source == "check_out"
+            assert output_count == 1
+            assert batch_count == 1
+            subprocess.run(["alembic", "downgrade", "0003"], check=True, env={
+                **os.environ,
+                "APP__ENV": "development", "TG__BOT_TOKEN": "test",
+                "DB__HOST": db_url.host or "localhost", "DB__PORT": str(db_url.port or 5432),
+                "DB__USER": db_url.username or "default", "DB__PASSWORD": db_url.password or "password",
+                "DB__NAME": db_name,
+            }, cwd=os.getcwd(), capture_output=True, text=True)
+            _run_alembic_for_db(db_url, db_name, "head")
+        finally:
+            await target_engine.dispose()
+    finally:
+        async with admin_engine.begin() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+        await admin_engine.dispose()
