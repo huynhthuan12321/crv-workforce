@@ -569,6 +569,36 @@ async def test_gd7c_manager_api_fields_and_filters(api_client, pg_factory):
     assert managed["has_open_session"] is True
 
 
+async def test_payroll_detail_groups_eligible_blocked_and_open_sessions(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await seed_actor(session, "NVGRP", EmployeeRole.employee, 7101)
+            manager = await seed_actor(session, "QLGRP", EmployeeRole.manager, 7102)
+            await seed_rate(session, employee.id, 30_000)
+            eligible = work_session(employee.id, check_in=NOW.replace(hour=7), check_out=NOW.replace(hour=8))
+            blocked = work_session(employee.id, check_in=NOW.replace(hour=9), check_out=NOW.replace(hour=10), flags=["gps_out_of_range"])
+            blocked.check_in_distance_m = Decimal("474")
+            needs_review = work_session(employee.id, status=SessionStatus.needs_review, check_in=NOW.replace(hour=11), check_out=None)
+            needs_review.review_reason = "forgot_checkout"
+            open_row = work_session(employee.id, status=SessionStatus.open, check_in=NOW.replace(hour=13), check_out=None)
+            session.add_all([eligible, blocked, needs_review, open_row])
+            await session.flush()
+            employee_id, manager_id = employee.id, manager.id
+            eligible_id, blocked_id, needs_review_id, open_id = eligible.id, blocked.id, needs_review.id, open_row.id
+
+    response = api_client.get(f"/api/payroll/{employee_id}?date={NOW.date()}", headers=auth_headers(manager_id))
+    assert response.status_code == 200, response.text
+    detail = response.json()["data"]
+    groups = {row["id"]: row["payroll_group"] for row in detail["sessions"]}
+    assert groups[eligible_id] == "pending_eligible"
+    assert groups[blocked_id] == "blocked_gps"
+    assert groups[needs_review_id] == "open_or_review"
+    assert groups[open_id] == "open_or_review"
+    assert detail["eligible_session_ids"] == [eligible_id]
+    assert detail["unreviewed_flag_session_ids"] == [blocked_id]
+    assert detail["needs_review_session_ids"] == [needs_review_id]
+
+
 async def test_gd7c_employee_admin_errors_audit_and_rate_conflict(api_client, pg_factory):
     async with pg_factory() as session:
         async with session.begin():

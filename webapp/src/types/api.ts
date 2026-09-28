@@ -227,6 +227,7 @@ export type PayrollSummary = {
 export type PayrollSession = WorkSession & {
   pay_batch_id: number | null;
   is_locked: boolean;
+  payroll_group?: "paid" | "pending_eligible" | "blocked_gps" | "open_or_review" | "other" | string | null;
 };
 
 export type PayrollBatch = {

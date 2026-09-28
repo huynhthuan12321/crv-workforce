@@ -51,6 +51,7 @@ class WorkSessionOut(BaseModel):
     nearby_location_distance_m: float | None = None
     nearby_location_code: str | None = None
     nearby_location_name: str | None = None
+    payroll_group: str | None = None
 
 
 class ReviewSessionOut(WorkSessionOut):

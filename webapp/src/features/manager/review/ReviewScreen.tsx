@@ -19,7 +19,7 @@ function mockKey(...parts: string[]) {
   return parts.join("_");
 }
 
-export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "gps" | "forgot"} = {}) {
+export function ReviewScreen({initialFilter = "all", initialSessionId = null}: {initialFilter?: "all" | "gps" | "forgot"; initialSessionId?: number | null} = {}) {
   const scenario = mockScenario();
   const [filter, setFilter] = useState<"all" | "gps" | "forgot">(initialFilter);
   const [locationId, setLocationId] = useState<number | null>(null);
@@ -62,12 +62,18 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
       if (forgot) setSelected(forgot);
     }
   }, [pending, scenario, selected]);
+  useEffect(() => {
+    if (!initialSessionId || selected) return;
+    const target = pending.find((row) => row.id === initialSessionId && reviewType(row) === "gps");
+    if (target) setSelected(target);
+  }, [initialSessionId, pending, selected]);
 
   const markFlags = async (row: ReviewItem) => {
     hapticImpact();
     try {
       await api.post(`/review/${row.id}/flags-reviewed`);
       hapticNotify("success");
+      setSelected(null);
       await load();
     } catch (err) {
       hapticNotify("error");
@@ -82,6 +88,19 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
     }
   };
 
+  if (selected && reviewType(selected) === "gps") {
+    return (
+      <div className="screen-stack">
+        <Button tone="ghost" className="back-button" onClick={() => setSelected(null)}>← Quay lại</Button>
+        <Card>
+          <SectionTitle eyebrow={selected.employee_code} title={selected.employee_name} />
+          <p className="muted">Vào ca {fmtTime(selected.check_in_at)} · {fmtDateLong(selected.check_in_at)}</p>
+          <p className="muted">{gpsLabel(selected)}</p>
+          <Button onClick={() => void markFlags(selected)}>Đã xem</Button>
+        </Card>
+      </div>
+    );
+  }
   if (selected) return <CloseForgottenScreen row={selected} onBack={() => setSelected(null)} onDone={() => { setSelected(null); void load(); }} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải mục cần xử lý" />;
   if (error) return <ScreenState kind="error" title="Không tải được dữ liệu" message={error} onRetry={load} />;

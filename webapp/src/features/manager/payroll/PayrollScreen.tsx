@@ -35,6 +35,18 @@ export function payrollStatusText(row: PayrollSummary): string {
   return "Chưa đủ điều kiện";
 }
 
+export function groupPayrollSessions(detail: Pick<PayrollDetail, "sessions" | "eligible_session_ids" | "unreviewed_flag_session_ids" | "needs_review_session_ids">) {
+  const eligible = new Set(detail.eligible_session_ids);
+  const blocked = new Set(detail.unreviewed_flag_session_ids);
+  const needsReview = new Set(detail.needs_review_session_ids);
+  return {
+    paid: detail.sessions.filter((row) => row.payroll_group === "paid" || (!row.payroll_group && row.pay_batch_id)),
+    pendingEligible: detail.sessions.filter((row) => row.payroll_group === "pending_eligible" || (!row.payroll_group && !row.pay_batch_id && eligible.has(row.id))),
+    blockedGps: detail.sessions.filter((row) => row.payroll_group === "blocked_gps" || (!row.payroll_group && !row.pay_batch_id && blocked.has(row.id))),
+    openOrReview: detail.sessions.filter((row) => row.payroll_group === "open_or_review" || (!row.payroll_group && !row.pay_batch_id && (row.status === "open" || needsReview.has(row.id)))),
+  };
+}
+
 function comparePayrollRows(a: PayrollSummary, b: PayrollSummary) {
   if (a.has_sessions !== b.has_sessions) return a.has_sessions ? -1 : 1;
   if (a.can_approve !== b.can_approve) return a.can_approve ? -1 : 1;
@@ -42,7 +54,7 @@ function comparePayrollRows(a: PayrollSummary, b: PayrollSummary) {
   return a.full_name.localeCompare(b.full_name, "vi");
 }
 
-export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} = {}) {
+export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: (sessionId?: number) => void} = {}) {
   const scenario = mockScenario();
   const [date, setDate] = useState(todayVN());
   const [locationId, setLocationId] = useState<number | null>(null);
@@ -98,7 +110,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
       setBusy(false);
     }
   };
-  if (detailId) return <PayrollDetailScreen employeeId={detailId} date={date} onBack={() => setDetailId(null)} />; if (result) return <PayrollResultScreen result={result} rows={rows} onBack={() => setResult(null)} />;
+  if (detailId) return <PayrollDetailScreen employeeId={detailId} date={date} onBack={() => setDetailId(null)} onOpenReviewGps={onOpenReviewGps} />; if (result) return <PayrollResultScreen result={result} rows={rows} onBack={() => setResult(null)} />;
   if (confirm) return <PayrollConfirmScreen rows={selected} totals={totals} busy={busy} onCancel={() => setConfirm(false)} onApprove={approve} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải dữ liệu duyệt lương" />;
   if (error) return <ScreenState kind="error" title="Không tải được duyệt lương" message={error} onRetry={load} />;
@@ -210,7 +222,7 @@ function PayrollResultScreen({result, rows, onBack}: {result: PayrollApproveResu
     </div>
   );
 }
-function PayrollDetailScreen({employeeId, date, onBack}: {employeeId: number; date: string; onBack: () => void}) {
+function PayrollDetailScreen({employeeId, date, onBack, onOpenReviewGps}: {employeeId: number; date: string; onBack: () => void; onOpenReviewGps?: (sessionId?: number) => void}) {
   const scenario = mockScenario();
   const [detail, setDetail] = useState<PayrollDetail | null>(null);
   const [edit, setEdit] = useState<PayrollSession | null>(null);
@@ -230,6 +242,7 @@ function PayrollDetailScreen({employeeId, date, onBack}: {employeeId: number; da
   if (edit) return <EditSessionScreen row={edit} onBack={() => setEdit(null)} onDone={() => { setEdit(null); void load(); }} />;
   if (error) return <ScreenState kind="error" title="Không tải được chi tiết" message={error} onRetry={load} />;
   if (!detail) return <ScreenState kind="loading" title="Đang tải chi tiết lương" />;
+  const grouped = groupPayrollSessions(detail);
   return (
     <div className="screen-stack">
       <Button tone="ghost" className="back-button" onClick={onBack}>← Quay lại</Button>
@@ -242,15 +255,29 @@ function PayrollDetailScreen({employeeId, date, onBack}: {employeeId: number; da
         {detail.batches.map((batch) => (
           <div className="history-block history-block--paid" key={batch.id}>
             <div className="history-block__head"><b>🔒 Đợt {batch.batch_no} · Đã trả</b><strong>{fmtMoney(batch.amount)}</strong></div>
-            {detail.sessions.filter((row) => row.pay_batch_id === batch.id).map((row) => <SessionLine key={row.id} row={row} />)}
+            {grouped.paid.filter((row) => row.pay_batch_id === batch.id).map((row) => <SessionLine key={row.id} row={row} />)}
           </div>
         ))}
         <div className="history-block">
           <div className="history-block__head"><b>Chờ duyệt</b><strong>{fmtMoney(detail.pending_amount)}</strong></div>
-          {detail.sessions.filter((row) => !row.pay_batch_id && row.status === "closed").map((row) => (
+          {grouped.pendingEligible.length === 0 && <p className="muted">Không có phiên đủ điều kiện duyệt.</p>}
+          {grouped.pendingEligible.map((row) => (
             <SessionLine key={row.id} row={row} action={<Button tone="secondary" onClick={() => setEdit(row)}>Sửa phiên</Button>} />
           ))}
-          {detail.sessions.filter((row) => row.status === "open").map((row) => <p key={row.id} className="muted">Phiên đang mở từ {fmtTime(row.check_in_at)} · sẽ vào đợt sau.</p>)}
+        </div>
+        <div className="history-block">
+          <div className="history-block__head"><b>Cần xem lại vị trí</b><strong>{fmtMoney(detail.blocked_amount)}</strong></div>
+          {grouped.blockedGps.length === 0 && <p className="muted">Không có phiên cần xem lại vị trí.</p>}
+          {grouped.blockedGps.map((row) => (
+            <SessionLine key={row.id} row={row} action={<Button tone="secondary" onClick={() => onOpenReviewGps?.(row.id)}>Xem</Button>} />
+          ))}
+        </div>
+        <div className="history-block">
+          <div className="history-block__head"><b>Đang mở / Quên ra ca</b></div>
+          {grouped.openOrReview.length === 0 && <p className="muted">Không có phiên đang mở hoặc quên ra ca.</p>}
+          {grouped.openOrReview.map((row) => (
+            <p key={row.id} className="muted">{row.status === "open" ? "Phiên đang mở" : "Phiên cần xử lý"} từ {fmtTime(row.check_in_at)} · sẽ vào đợt sau.</p>
+          ))}
         </div>
       </Card>
     </div>

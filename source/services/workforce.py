@@ -944,6 +944,9 @@ class PayrollService:
         if not employee:
             raise fail("NOT_REGISTERED", 404)
         summary = await self._payroll_summary(employee, day)
+        eligible_ids = set(summary["eligible_session_ids"])
+        unreviewed_ids = set(summary["unreviewed_flag_session_ids"])
+        needs_review_ids = set(summary["needs_review_session_ids"])
         sessions = list((await self.session.scalars(select(WorkSessionOrm).where(
             WorkSessionOrm.employee_id == employee_id,
             WorkSessionOrm.work_date == day,
@@ -956,6 +959,13 @@ class PayrollService:
             "sessions": [(await session_dict_with_nearby(self.session, row)) | {
                 "pay_batch_id": row.pay_batch_id,
                 "is_locked": row.pay_batch_id is not None,
+                "payroll_group": (
+                    "paid" if row.pay_batch_id is not None
+                    else "pending_eligible" if row.id in eligible_ids
+                    else "blocked_gps" if row.id in unreviewed_ids
+                    else "open_or_review" if row.status == SessionStatus.open or row.id in needs_review_ids
+                    else "other"
+                ),
             } for row in sessions],
             "batches": [{
                 "id": batch.id,

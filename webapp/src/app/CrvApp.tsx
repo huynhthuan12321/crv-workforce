@@ -59,6 +59,7 @@ export function CrvApp() {
   const [loginError, setLoginError] = useState<ApiError | null>(null);
   const [recentOutputSessionId, setRecentOutputSessionId] = useState<number | null>(null);
   const [reviewInitialFilter, setReviewInitialFilter] = useState<"all" | "gps" | "forgot">("all");
+  const [reviewInitialSessionId, setReviewInitialSessionId] = useState<number | null>(null);
   const [mockRefresh, setMockRefresh] = useState(0);
 
   const login = useCallback(async () => {
@@ -110,8 +111,8 @@ export function CrvApp() {
     outputs: <OutputsScreen recentSessionId={recentOutputSessionId} />,
     history: <HistoryScreen />,
     working: <WorkingScreen />,
-    review: <ReviewScreen initialFilter={reviewInitialFilter} />,
-    payroll: <PayrollScreen onOpenReviewGps={() => { setReviewInitialFilter("gps"); setTab("review"); }} />,
+    review: <ReviewScreen initialFilter={reviewInitialFilter} initialSessionId={reviewInitialSessionId} />,
+    payroll: <PayrollScreen onOpenReviewGps={(sessionId) => { setReviewInitialFilter("gps"); setReviewInitialSessionId(sessionId ?? null); setTab("review"); }} />,
     employees: <EmployeesScreen />,
     reports: <ReportsScreen />,
   };
