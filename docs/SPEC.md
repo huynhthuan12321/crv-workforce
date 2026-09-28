@@ -46,7 +46,7 @@
 
 - **Số phút của phiên** = (giờ ra − giờ vào), bỏ phần giây lẻ (làm tròn xuống phút nguyên). Không trừ giờ nghỉ.
 - **Tiền của phiên (chưa làm tròn)** = số phút × `rate_snapshot` ÷ 60.
-- **Tổng ngày (chưa làm tròn)** = tổng tiền mọi phiên đã đóng trong ngày của nhân viên đó.
+- **Tổng ngày (chưa làm tròn)** = tổng tiền mọi phiên đã đóng trong ngày của nhân viên đó, dù trong ngày có nhiều đơn giá hoặc nhiều kho.
 - **Làm tròn LÊN tới 1.000đ, áp dụng trên TỔNG NGÀY**, không làm tròn từng phiên.
 - Không có phiên qua nửa đêm. Giờ ra luôn cùng ngày với giờ vào.
 
@@ -104,15 +104,16 @@ Gồm hai loại:
 - Duyệt = **trả ngay**. Đợt được tạo ở trạng thái `paid`. Đợt và các phiên bên trong bị **khóa vĩnh viễn**, không ai sửa được.
 - Có thể duyệt nhiều nhân viên cùng lúc; mỗi nhân viên tạo một đợt riêng.
 - Bộ lọc kho trong màn Duyệt lương chỉ xác định nhân viên được hiển thị; khi duyệt một nhân viên, hệ thống xử lý toàn bộ phiên đủ điều kiện của nhân viên đó trong ngày, bất kể các phiên thuộc kho nào. Lương vẫn làm tròn một lần theo tổng ngày của nhân viên, không làm tròn riêng từng kho.
+- Nếu một ngày có nhiều đơn giá, hệ thống vẫn cộng tiền phiên theo từng `rate_snapshot` rồi làm tròn một lần trên tổng ngày. Chi tiết duyệt lương phải hiển thị đơn giá và tiền thô từng phiên để người duyệt kiểm tra.
 - Nếu không còn phiên nào đủ điều kiện → báo "Không có dữ liệu để duyệt".
 - Duyệt xong, bot nhắn cho nhân viên số tiền của đợt.
 - Hai người cùng duyệt một nhân viên cùng lúc → chỉ một đợt được tạo.
 
 ### 2.11. Quản lý nhân viên (chỉ quản lý)
 
-- Thêm nhân viên: họ tên, mã NV, đơn giá giờ, ngày hiệu lực và **kho được phân công ban đầu**. Hệ thống tạo **link mời dùng một lần** (dạng `https://t.me/<bot>/<app>?startapp=<mã_mời>`). Nhân viên mở link → hệ thống gắn Telegram ID vào hồ sơ. Link **dùng một lần, hết hạn sau 7 ngày**; quản lý tạo lại được.
+- Thêm nhân viên: họ tên, mã NV, đơn giá giờ ban đầu và **kho được phân công ban đầu**. Đơn giá ban đầu dùng cơ chế lịch sử đơn giá theo thời điểm ở 2.18. Hệ thống tạo **link mời dùng một lần** (dạng `https://t.me/<bot>/<app>?startapp=<mã_mời>`). Nhân viên mở link → hệ thống gắn Telegram ID vào hồ sơ. Link **dùng một lần, hết hạn sau 7 ngày**; quản lý tạo lại được.
 - Khóa / mở khóa nhân viên. Không khóa được người đang có phiên mở.
-- Đơn giá: thêm mức mới kèm "hiệu lực từ ngày" (không được trước ngày hôm nay). Giữ lịch sử đơn giá. Phiên đã tạo giữ nguyên `rate_snapshot` của nó.
+- Đơn giá: quản lý được điều chỉnh theo 2 chế độ ở 2.18: "Từ lần vào ca tiếp theo" hoặc "Từ ngày ..." (ngày mai trở đi, 00:00 giờ VN). Giữ lịch sử đơn giá theo thời điểm, cho hủy mức hẹn chưa hiệu lực, bắt buộc lý do. Phiên đã tạo giữ nguyên `rate_snapshot` của nó.
 - Quản lý được đổi kho phân công cho nhân viên, bắt buộc ghi lý do; phiên đang mở và lịch sử giữ snapshot kho cũ. Giám đốc không được phân công nhân viên vào kho.
 
 ### 2.12. Báo cáo (giám đốc)
@@ -309,3 +310,93 @@ Dán tọa độ / link Google Maps → `coordinate_source = manual_coordinates`
 #### 2.17.12. GPS và log
 
 GPS nghiệp vụ lưu trong DB. KHÔNG ghi tọa độ vào application log. Chính sách retention: việc tương lai.
+
+### 2.18. Lịch sử đơn giá
+
+Trạng thái: **ĐÃ CHỐT – đóng băng trước khi code.** Mọi thay đổi phải sửa `docs/spec/2.18_don_gia.md` trước.
+Liên quan: 2.5 (tính tiền), 2.10 (duyệt lương), 2.11 (quản lý nhân viên), 2.17 (điểm làm việc), 2.19 (khoản điều chỉnh lương – chưa chốt).
+
+#### 2.18.0. Ba quy tắc gốc
+
+**R-RATE – Lịch sử đơn giá.** Mỗi nhân viên có lịch sử đơn giá theo thời điểm. Đơn giá có hiệu lực tại thời điểm T là bản ghi chưa bị hủy có `effective_from` lớn nhất nhưng không vượt quá T. Hệ thống không cho tạo thay đổi đơn giá có hiệu lực trong quá khứ.
+
+**R-SNAPSHOT – Snapshot phiên.** Khi check-in, hệ thống lấy đơn giá đang có hiệu lực và lưu cố định vào `rate_snapshot`. Mọi thay đổi đơn giá sau đó không ảnh hưởng phiên đang mở hoặc phiên lịch sử.
+
+**R-ADJUST – Điều chỉnh lương.** Sai lệch lương sau khi phiên hoặc đợt thanh toán đã khóa không được sửa ngược dữ liệu gốc. Hệ thống tạo một khoản điều chỉnh lương độc lập, có số tiền cộng/trừ, lý do, người thực hiện và audit, sau đó đưa khoản điều chỉnh vào kỳ thanh toán tiếp theo. *(Chi tiết ở SPEC 2.19 – làm riêng, KHÔNG thuộc phạm vi 2.18.)*
+
+Hệ quả tính tiền (không đổi so với 2.5): tiền phiên theo `rate_snapshot`; tổng các phiên trong ngày của một nhân viên được cộng trước và làm tròn lên 1.000đ MỘT lần, không tách theo đơn giá hay điểm làm việc.
+
+#### 2.18.1. Mô hình dữ liệu – nâng cấp bảng `rate_history` hiện có (mô hình bậc thang)
+
+| Cột | Thay đổi |
+|---|---|
+| id, employee_id, hourly_rate | giữ |
+| effective_from | `date` → **`timestamptz`** |
+| reason | THÊM, bắt buộc (bản ghi migrate: "Dữ liệu trước nâng cấp") |
+| created_by, created_at | giữ |
+| cancelled_at, cancelled_by, cancel_reason | THÊM – chỉ cho mức ĐÃ HẸN chưa có hiệu lực |
+
+- KHÔNG có `effective_to` → không thể chồng thời gian.
+- Ràng buộc: `hourly_rate > 0`; partial unique `(employee_id, effective_from) WHERE cancelled_at IS NULL`; partial unique `(employee_id) WHERE cancelled_at IS NULL AND effective_from > now()` KHÔNG làm được bằng index (now() không immutable) → kiểm tra ở service trong transaction có khóa nhân viên (xem mục 2).
+- Không DELETE, không UPDATE giá trị/thời điểm của bản ghi. Chỉ được ghi các cột hủy của mức chưa hiệu lực.
+
+#### 2.18.2. Thay đổi đơn giá (chỉ QUẢN LÝ; giám đốc chỉ xem – giữ SPEC 2.2)
+
+UI chỉ có 2 chế độ (không cho chọn giờ phút):
+
+1. **● Từ lần vào ca tiếp theo** (mặc định) → `effective_from = now()` lúc xác nhận. Phiên đang mở giữ đơn giá cũ; mọi phiên check-in sau thời điểm đó dùng mức mới.
+2. **○ Từ ngày …** → chọn NGÀY từ ngày mai trở đi → `effective_from = 00:00:00 +07:00` ngày đó. UI ghi: "Có hiệu lực với các phiên bắt đầu từ ngày DD/MM/YYYY."
+
+- `effective_from < now()` → `RATE_IN_PAST`.
+- **Tối đa 1 mức hẹn trước chưa có hiệu lực** cho mỗi nhân viên. Đã có mức hẹn → phải hủy trước khi hẹn mức khác (`RATE_PENDING_EXISTS`). Chế độ "Từ lần vào ca tiếp theo" khi đang có mức hẹn: vẫn cho phép, mức hẹn giữ nguyên (sẽ thay thế khi tới ngày).
+- Lý do bắt buộc 5–200 ký tự. UI có chọn nhanh: "Tăng theo năng lực", "Điều chỉnh nhiệm vụ", "Thay đổi công việc", "Điều chỉnh tạm thời", "Khác" – lưu nguyên văn chữ.
+- Lệch > 50% so với mức hiện hành → KHÔNG chặn, bắt xác nhận lần 2: "Đơn giá giảm 62,5%: 40.000đ → 15.000đ/giờ. Vui lòng xác nhận đây là thay đổi chủ động." (tăng thì ghi "tăng").
+- Giới hạn cứng cấu hình được: `RULES__MIN_HOURLY_RATE` (mặc định 1.000), `RULES__MAX_HOURLY_RATE` (mặc định 1.000.000) → `RATE_OUT_OF_RANGE`. Không hard-code.
+- Hủy mức hẹn: chỉ khi `effective_from > now()`, bắt buộc lý do; mức đã hiệu lực KHÔNG hủy được – muốn đổi thì tạo mức mới.
+- Audit: `rate_changed` (cũ → mới, chế độ, effective_from, lý do), `rate_cancelled`.
+- Thao tác đổi/hủy khóa bản ghi nhân viên (FOR UPDATE) – cùng thứ tự khóa với 2.17 mục 5.
+- Nhân viên mới: đơn giá ban đầu dùng cùng 2 chế độ, lý do mặc định "Đơn giá ban đầu".
+
+#### 2.18.3. Vào ca và thao tác phiên
+
+- Check-in tra đơn giá theo **thời điểm check-in** (không theo ngày) → `rate_snapshot`. Không có đơn giá → `NO_RATE` ("Chưa có đơn giá, liên hệ quản lý").
+- `rate_snapshot` BẤT BIẾN: sửa giờ phiên, đóng phiên quên ra ca, đổi kho, đổi/hủy đơn giá đều không đổi nó.
+- Đơn giá và điểm làm việc là hai miền độc lập (V1 không có đơn giá theo kho).
+
+#### 2.18.4. Tính tiền
+
+Như 2.5: phiên = phút × rate_snapshot / 60; ngày = Σ phiên (mọi đơn giá, mọi kho) → làm tròn 1 lần.
+Ví dụ: 08:00–10:00 @30k = 60.000; 13:00–17:00 @40k = 160.000 → 220.000đ.
+
+#### 2.18.5. Hiển thị
+
+**Màn Chấm công (nhân viên)** – tách rõ 2 khái niệm:
+
+- "Tạm tính hôm nay: X đ" (cả ngày, số lớn).
+- "Ca này: 43 phút × 30.000đ/giờ" (ca đang mở, dùng rate_snapshot). Không bao giờ đặt công thức ca này ngay dưới số cả ngày như thể là một.
+- Có mức hẹn áp dụng cho mình → dòng nhỏ "Từ 01/11/2026: 40.000đ/giờ".
+
+**Duyệt lương – dòng nhân viên**: 1 đơn giá → "Đơn giá 30.000đ/giờ". Nhiều đơn giá trong ngày → "2 phiên · 6 giờ · 2 mức đơn giá (30.000 → 40.000đ/giờ)" + "Tạm tính ngày 220.000đ". KHÔNG hiện một đơn giá duy nhất.
+
+**Duyệt lương – chi tiết**: mỗi phiên hiện giờ, đơn giá, tiền phiên (chưa làm tròn) để quản lý hiểu tổng.
+
+**Hồ sơ nhân viên** (quản lý; giám đốc chỉ xem): Đơn giá hiện tại + "Hiệu lực từ DD/MM/YYYY · HH:MM"; mức hẹn (nếu có) + nút Hủy; bảng Lịch sử đơn giá (hiệu lực, đơn giá, lý do, người đổi, trạng thái Đã hủy).
+
+**Màn Điều chỉnh đơn giá**: đơn giá hiện tại, ô mức mới, 2 chế độ hiệu lực, lý do (chọn nhanh + ô chữ), câu "Phiên đang làm hiện tại không bị thay đổi đơn giá.", Hủy / Xác nhận.
+
+#### 2.18.6. Thông báo bot (riêng nhân viên, chống trùng bằng dedupe_key; KHÔNG gửi lý do nội bộ)
+
+- Hiệu lực ngay: "Đơn giá của bạn đã được cập nhật.\nMức mới: 40.000đ/giờ\nÁp dụng từ lần vào ca tiếp theo."
+- Hẹn ngày: "Đơn giá của bạn sẽ được cập nhật.\nMức mới: 40.000đ/giờ\nCó hiệu lực từ 01/11/2026."
+- Hủy mức hẹn: "Thay đổi đơn giá dự kiến từ 01/11/2026 đã được hủy. Đơn giá hiện tại của bạn vẫn là 30.000đ/giờ."
+
+#### 2.18.7. Migration
+
+- `effective_from` date → timestamptz 00:00 giờ VN của ngày cũ; `reason = "Dữ liệu trước nâng cấp"`.
+- Không đụng `rate_snapshot` phiên cũ. Số bản ghi trước/sau bằng nhau.
+
+#### 2.18.8. Ngoài phạm vi 2.18
+
+**SPEC 2.19 – Khoản điều chỉnh lương** (chưa chốt, làm sau): bảng `salary_adjustments` (employee_id, amount ±, type, reason, related_session_id, related_batch_id, status, paid_batch_id, created_by, created_at), đưa vào đợt trả kế tiếp, không sửa phiên/đợt/đơn giá gốc.
+
+Còn phải chốt trước khi làm 2.19: (a) khoản âm lớn hơn tiền kỳ này → không tạo đợt âm, chuyển phần âm còn lại sang kỳ sau (`payable_now = max(0, …)`, carry_forward) hay V1 chỉ hỗ trợ khoản cộng; (b) khoản điều chỉnh có làm tròn không và làm tròn cùng hay tách khỏi lương ngày; (c) ai được tạo/duyệt khoản điều chỉnh.
