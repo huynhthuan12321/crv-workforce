@@ -841,6 +841,23 @@ input:disabled {
   flex-wrap: wrap;
 }
 
+.location-chip-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  scrollbar-width: none;
+}
+
+.location-chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.location-chip-row .small-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .manager-row > *,
 .action-row > *,
 .chip-row > *,

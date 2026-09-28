@@ -6,6 +6,7 @@ import {fmtMoney} from "../../../lib/format";
 import {gpsLabel} from "../../../lib/gps-label";
 import {hapticNotify} from "../../../lib/haptic";
 import type {CheckoutBounds, PayrollApproveResult, PayrollDetail, PayrollSession, PayrollSummary, WorkSession} from "../../../types/api";
+import {LocationFilterChips} from "../../locations/LocationFilterChips";
 import {errorText, pendingText, sessionTime, useBackButton} from "../shared";
 
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
@@ -44,6 +45,7 @@ function comparePayrollRows(a: PayrollSummary, b: PayrollSummary) {
 export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} = {}) {
   const scenario = mockScenario();
   const [date, setDate] = useState(todayVN());
+  const [locationId, setLocationId] = useState<number | null>(null);
   const [rows, setRows] = useState<PayrollSummary[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>(
     scenario === mockKey("manager", "payroll", "confirm") ? [2, 4] : [],
@@ -61,13 +63,13 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
   const load = useCallback(async () => {
     try {
       setError(null);
-      setRows(await api.get<PayrollSummary[]>(`/payroll?date=${date}`));
+      setRows(await api.get<PayrollSummary[]>(`/payroll?date=${date}${locationId ? `&location_id=${locationId}` : ""}`));
     } catch (err) {
       setError(errorText(err));
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, locationId]);
   useEffect(() => void load(), [load]);
   const sortedRows = [...rows].sort(comparePayrollRows);
   const approvableIds = sortedRows.filter((row) => row.can_approve).map((row) => row.employee_id);
@@ -107,6 +109,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
         title={fmtDateLong(`${date}T12:00:00+07:00`)}
         action={<DateNav value={date} onChange={setDate} />}
       />
+      <LocationFilterChips value={locationId} onChange={setLocationId} />
       {rows.length === 0 && <ScreenState kind="empty" title="Không có dữ liệu để duyệt" message="Hiện không có phiên nào đủ điều kiện duyệt lương." />}
       {approvableIds.length > 0 && (
         <label className="select-all-row">
@@ -150,6 +153,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} 
               <Metric label="Đã trả hôm nay" value={fmtMoney(row.paid_amount)} />
             </div>
             {row.pending_reasons.filter((reason) => reason !== "open_session").map((reason) => <p key={reason} className="muted">{pendingText(reason as PayrollSummary["pending_reason"])}</p>)}
+            {(row.day_locations?.length ?? 0) >= 2 && <p className="muted">⚠ Có phiên tại {row.day_locations?.length} điểm làm việc: {row.day_locations?.map((item) => item.name || item.code).join(", ")}</p>}
             {row.has_open_session && <p className="muted">Có phiên đang mở, sẽ vào đợt sau.</p>}
             {!row.has_sessions && <p className="muted">Nhân viên chưa có phiên làm trong ngày này.</p>}
           </Card>

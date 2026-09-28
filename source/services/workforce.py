@@ -478,6 +478,13 @@ class WorkingService:
                 "flags": row.flags or [],
                 "check_in_distance_m": float(row.check_in_distance_m) if row.check_in_distance_m is not None else None,
                 "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
+                "flag_source": row.flag_source,
+                "check_out_distance_m": float(row.check_out_distance_m) if row.check_out_distance_m is not None else None,
+                "check_out_accuracy_m": float(row.check_out_accuracy_m) if row.check_out_accuracy_m is not None else None,
+                "location_code_snapshot": row.location_code_snapshot,
+                "location_name_snapshot": row.location_name_snapshot,
+                "nearby_location_id": row.nearby_location_id,
+                "nearby_location_distance_m": float(row.nearby_location_distance_m) if row.nearby_location_distance_m is not None else None,
                 "is_outside": "gps_out_of_range" in (row.flags or []),
                 "server_now": iso_vn(now),
             })

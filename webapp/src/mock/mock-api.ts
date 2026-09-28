@@ -5,6 +5,7 @@ import {
   mockEmployee,
   mockEmployees,
   mockHistory,
+  mockLocations,
   mockManager,
   mockDirector,
   mockReportEmployees,
@@ -71,7 +72,11 @@ class MockApi {
     }
     if (path.startsWith("/reports/products")) return mockReportProducts as T;
     if (path.startsWith("/reports/timeseries")) return (this.scenario === "director_report_day" ? [mockReportSeries[1]] : mockReportSeries) as T;
-    if (path === "/working-now") {
+    if (path.startsWith("/locations") && options.method === "PATCH") return mockLocations[0] as T;
+    if (path === "/locations" && options.method === "POST") return {...mockLocations[1], id: 9} as T;
+    if (path.includes("/deactivate") || path.includes("/activate")) return mockLocations[0] as T;
+    if (path.startsWith("/locations")) return mockLocations as T;
+    if (path.startsWith("/working-now")) {
       return (this.scenario === "manager_working_empty" ? [] : mockWorkingNow) as T;
     }
     if (path.startsWith("/review/") && path.endsWith("/checkout-bounds")) {

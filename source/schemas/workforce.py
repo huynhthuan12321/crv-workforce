@@ -54,6 +54,8 @@ class WorkSessionOut(BaseModel):
 class ReviewSessionOut(WorkSessionOut):
     employee_code: str
     employee_name: str
+    nearby_location_code: str | None = None
+    nearby_location_name: str | None = None
 
 
 class ReviewResolvedOut(ReviewSessionOut):
@@ -129,8 +131,15 @@ class WorkingNowOut(BaseModel):
     check_in_at: str
     minutes_worked: int
     flags: list[str]
+    flag_source: str | None = None
     check_in_distance_m: float | None = None
     check_in_accuracy_m: float | None = None
+    check_out_distance_m: float | None = None
+    check_out_accuracy_m: float | None = None
+    location_code_snapshot: str | None = None
+    location_name_snapshot: str | None = None
+    nearby_location_id: int | None = None
+    nearby_location_distance_m: float | None = None
     is_outside: bool = False
     server_now: str
 

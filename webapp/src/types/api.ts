@@ -41,10 +41,14 @@ export type WorkSession = {
   check_out_accuracy_m?: number | null;
   check_out_distance_m: number | null;
   work_location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
   location_code_snapshot?: string | null;
   location_name_snapshot?: string | null;
   nearby_location_id?: number | null;
   nearby_location_distance_m?: number | null;
+  nearby_location_code?: string | null;
+  nearby_location_name?: string | null;
 };
 
 export type WorkLocation = {
@@ -165,6 +169,12 @@ export type WorkingNowItem = {
   check_in_accuracy_m: number | null;
   check_out_distance_m?: number | null;
   check_out_accuracy_m?: number | null;
+  location_code_snapshot?: string | null;
+  location_name_snapshot?: string | null;
+  nearby_location_id?: number | null;
+  nearby_location_distance_m?: number | null;
+  nearby_location_code?: string | null;
+  nearby_location_name?: string | null;
   is_outside: boolean;
   server_now: string;
 };
@@ -206,6 +216,10 @@ export type PayrollSummary = {
   needs_review_session_ids: number[];
   pending_reason: "open_session" | "unreviewed_gps" | "forgot_checkout" | null;
   pending_reasons: Array<"open_session" | "unreviewed_gps" | "forgot_checkout" | string>;
+  work_location_ids?: number[];
+  work_location_names?: string[];
+  day_locations?: Array<{id: number; code: string | null; name: string | null}>;
+  has_multiple_locations?: boolean;
 };
 
 export type PayrollSession = WorkSession & {

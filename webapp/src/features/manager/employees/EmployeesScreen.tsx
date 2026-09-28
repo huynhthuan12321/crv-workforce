@@ -4,6 +4,7 @@ import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../co
 import {fmtDate, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
 import {hapticNotify} from "../../../lib/haptic";
+import {getCurrentLocation} from "../../../lib/location";
 import type {ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
 import {errorText, useBackButton} from "../shared";
 
@@ -50,7 +51,7 @@ export function EmployeesScreen() {
 
   if (screen === "add") return <EmployeeAddScreen onBack={() => setScreen("list")} onCreated={(url) => setInvite(url)} invite={invite} />;
   if (screen === "detail") return <EmployeeDetailScreen employee={selected || rows[0]} onBack={() => setScreen("list")} onChanged={load} />;
-  if (subtab === "locations") return <LocationsScreen onBack={() => setSubtab("employees")} />;
+  if (subtab === "locations") return <LocationsScreen onBack={() => setSubtab("employees")} canAssignEmployees />;
   if (loading) return <ScreenState kind="loading" title="Đang tải nhân viên" />;
   if (error) return <ScreenState kind="error" title="Không tải được nhân viên" message={error} onRetry={load} />;
 
@@ -104,9 +105,22 @@ export function EmployeesScreen() {
   );
 }
 
-function LocationsScreen({onBack}: {onBack: () => void}) {
+type GpsCapture = {lat: number; lng: number; accuracy_m: number} | null;
+
+function accuracyText(gps: GpsCapture) {
+  if (!gps) return null;
+  const m = Math.round(gps.accuracy_m);
+  if (gps.accuracy_m <= 30) return {tone: "success" as const, text: `● Tốt · ±${m} m`};
+  if (gps.accuracy_m <= 100) return {tone: "warning" as const, text: `⚠ Trung bình · ±${m} m · nên kiểm tra trên bản đồ trước khi lưu`};
+  return {tone: "danger" as const, text: `⚠ Thấp · ±${m} m`};
+}
+
+export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: () => void; canAssignEmployees?: boolean}) {
   const [rows, setRows] = useState<WorkLocation[]>([]);
   const [form, setForm] = useState({code: "", name: "", latitude: "", longitude: "", radius_m: 100});
+  const [editing, setEditing] = useState<WorkLocation | null>(null);
+  const [gps, setGps] = useState<GpsCapture>(null);
+  const [needConfirm, setNeedConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -120,30 +134,42 @@ function LocationsScreen({onBack}: {onBack: () => void}) {
 
   useEffect(() => void load(), [load]);
 
-  const create = async (source: "gps" | "manual") => {
+  const captureGps = async () => {
     setBusy(true);
     setError(null);
     try {
-      let latitude = Number(form.latitude);
-      let longitude = Number(form.longitude);
-      let accuracy: number | null = null;
-      if (source === "gps") {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {maximumAge: 0, timeout: 10000}));
-        latitude = position.coords.latitude;
-        longitude = position.coords.longitude;
-        accuracy = position.coords.accuracy;
-      }
-      await api.post<WorkLocation>("/locations", {
+      const location = await getCurrentLocation();
+      setGps(location);
+      setNeedConfirm(location.accuracy_m > 100);
+      setForm((current) => ({...current, latitude: String(location.lat), longitude: String(location.lng)}));
+    } catch (err) {
+      hapticNotify("error");
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async (source: "gps" | "manual", lowAccuracyConfirmed = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = {
         code: form.code,
         name: form.name,
-        latitude,
-        longitude,
+        latitude: Number(form.latitude),
+        longitude: Number(form.longitude),
         radius_m: form.radius_m,
         coordinate_source: source === "gps" ? "device_gps" : "manual_coordinates",
-        location_accuracy_m: accuracy,
-        low_accuracy_confirmed: accuracy === null || accuracy <= 100,
-      });
+        location_accuracy_m: source === "gps" ? gps?.accuracy_m ?? null : null,
+        low_accuracy_confirmed: source !== "gps" || !gps || gps.accuracy_m <= 100 || lowAccuracyConfirmed,
+      };
+      if (editing) await api.patch<WorkLocation>(`/locations/${editing.id}`, body);
+      else await api.post<WorkLocation>("/locations", body);
       setForm({code: "", name: "", latitude: "", longitude: "", radius_m: 100});
+      setEditing(null);
+      setGps(null);
+      setNeedConfirm(false);
       hapticNotify("success");
       await load();
     } catch (err) {
@@ -171,13 +197,17 @@ function LocationsScreen({onBack}: {onBack: () => void}) {
       <label className="form-field">Tên kho<input value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} placeholder="Kho đóng gói" /></label>
       <div className="two-col">
         <label className="form-field">Vĩ độ<input value={form.latitude} onChange={(event) => setForm({...form, latitude: event.target.value})} /></label>
-        <label className="form-field">Kinh độ<input value={form.longitude} onChange={(event) => setForm({...form, longitude: event.target.value})} /></label>
+      <label className="form-field">Kinh độ<input value={form.longitude} onChange={(event) => setForm({...form, longitude: event.target.value})} /></label>
       </div>
       <label className="form-field">Bán kính (m)<input type="number" value={form.radius_m} onChange={(event) => setForm({...form, radius_m: Number(event.target.value)})} /></label>
+      {gps && <div className="chip-row"><Chip tone={accuracyText(gps)?.tone ?? "neutral"}>{accuracyText(gps)?.text}</Chip></div>}
+      {needConfirm && <p className="muted">Độ chính xác ước tính thấp. Hãy thử lấy lại vị trí; nếu vẫn cần lưu, bấm “Vẫn lưu vị trí này”.</p>}
       {error && <p className="form-error">{error}</p>}
       <div className="action-row">
-        <Button busy={busy} onClick={() => void create("gps")}>Tạo bằng GPS</Button>
-        <Button tone="secondary" busy={busy} onClick={() => void create("manual")}>Tạo thủ công</Button>
+        <Button tone="secondary" busy={busy} onClick={() => void captureGps()}>Thử lấy vị trí GPS</Button>
+        {needConfirm
+          ? <Button tone="warning" busy={busy} onClick={() => void save("gps", true)}>Vẫn lưu vị trí này</Button>
+          : <Button busy={busy} onClick={() => void save(gps ? "gps" : "manual")}>{editing ? "Lưu kho" : "Tạo kho"}</Button>}
       </div>
     </Card>
     {rows.map((row) => <Card key={row.id} className="manager-card">
@@ -188,7 +218,16 @@ function LocationsScreen({onBack}: {onBack: () => void}) {
         </div>
         <Chip tone={row.is_active ? "success" : "danger"}>{row.is_active ? "Đang dùng" : "Ngừng dùng"}</Chip>
       </div>
-      <Button tone="secondary" onClick={() => void toggle(row)}>{row.is_active ? "Ngừng dùng" : "Dùng lại"}</Button>
+      <div className="action-row">
+        <Button tone="secondary" onClick={() => {
+          setEditing(row);
+          setForm({code: row.code, name: row.name, latitude: String(row.latitude), longitude: String(row.longitude), radius_m: row.radius_m});
+          setGps(row.coordinate_source === "device_gps" && row.location_accuracy_m != null ? {lat: row.latitude, lng: row.longitude, accuracy_m: row.location_accuracy_m} : null);
+          setNeedConfirm(false);
+        }}>Sửa</Button>
+        <Button tone="secondary" onClick={() => void toggle(row)}>{row.is_active ? "Ngừng dùng" : "Dùng lại"}</Button>
+      </div>
+      {!canAssignEmployees && <p className="muted">Giám đốc chỉ quản lý danh mục kho, không phân công nhân viên tại đây.</p>}
     </Card>)}
   </div>;
 }

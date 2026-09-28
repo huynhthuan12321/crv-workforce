@@ -5,6 +5,7 @@ import {fmtDate, fmtDateLong, fmtTime} from "../../../lib/date-vn";
 import {gpsLabel} from "../../../lib/gps-label";
 import {hapticImpact, hapticNotify} from "../../../lib/haptic";
 import type {CheckoutBounds, ReviewItem, WorkSession} from "../../../types/api";
+import {LocationFilterChips} from "../../locations/LocationFilterChips";
 import {errorText, reviewType, sessionTime, useBackButton} from "../shared";
 
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
@@ -21,6 +22,7 @@ function mockKey(...parts: string[]) {
 export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "gps" | "forgot"} = {}) {
   const scenario = mockScenario();
   const [filter, setFilter] = useState<"all" | "gps" | "forgot">(initialFilter);
+  const [locationId, setLocationId] = useState<number | null>(null);
   const [mode, setMode] = useState<"pending" | "resolved">(
     scenario === mockKey("manager", "review", "resolved") ? "resolved" : "pending",
   );
@@ -35,7 +37,10 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
   const load = useCallback(async () => {
     try {
       setError(null);
-      const suffix = filter === "all" ? "" : `?type=${filter}`;
+      const params = new URLSearchParams();
+      if (filter !== "all") params.set("type", filter);
+      if (locationId) params.set("location_id", String(locationId));
+      const suffix = params.toString() ? `?${params}` : "";
       const [nextPending, nextResolved] = await Promise.all([
         api.get<ReviewItem[]>(`/review/pending${suffix}`),
         api.get<ReviewItem[]>(`/review/resolved${suffix}`),
@@ -47,7 +52,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, locationId]);
 
   useEffect(() => void load(), [load]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
@@ -88,6 +93,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
   return (
     <div className="screen-stack">
       <SectionTitle eyebrow="Cần xử lý" title="Phiên bất thường" />
+      <LocationFilterChips value={locationId} onChange={setLocationId} />
       {notice && <Card className="notice-card">{notice}</Card>}
       <div className="segmented">
         {(["all", "gps", "forgot"] as const).map((key) => (

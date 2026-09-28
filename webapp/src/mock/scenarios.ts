@@ -9,6 +9,7 @@ import type {
   ReviewItem,
   Today,
   WorkSession,
+  WorkLocation,
   WorkingNowItem,
 } from "../types/api";
 
@@ -280,6 +281,12 @@ export const mockWorkingNow: WorkingNowItem[] = [
   {session_id: 201, employee_id: 2, code: "NV002", full_name: "Lê Thị B", check_in_at: "2024-04-24T07:55:00+07:00", minutes_worked: 125, flags: [], check_in_distance_m: 22, check_in_accuracy_m: 20, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
   {session_id: 301, employee_id: 3, code: "NV003", full_name: "Trần Văn C", check_in_at: "2024-04-24T08:10:00+07:00", minutes_worked: 45, flags: ["gps_out_of_range"], flag_source: "check_in", check_in_distance_m: 150, check_in_accuracy_m: 35, is_outside: true, server_now: "2024-04-24T09:40:15+07:00"},
   {session_id: 401, employee_id: 4, code: "NV004", full_name: "Phạm Thị D", check_in_at: "2024-04-24T09:20:00+07:00", minutes_worked: 45, flags: [], check_in_distance_m: 14, check_in_accuracy_m: 18, is_outside: false, server_now: "2024-04-24T09:40:15+07:00"},
+];
+
+export const mockLocations: WorkLocation[] = [
+  {id: 1, code: "KHO01", name: "Kho A", location_type: "workshop", address: null, latitude: 10, longitude: 106, radius_m: 100, coordinate_source: "manual_coordinates", location_accuracy_m: null, is_active: true},
+  {id: 2, code: "KHO02", name: "Kho B", location_type: "workshop", address: null, latitude: 10.0004, longitude: 106, radius_m: 100, coordinate_source: "device_gps", location_accuracy_m: 24, is_active: true},
+  {id: 3, code: "KHO03", name: "Kho tạm ngừng", location_type: "workshop", address: null, latitude: 10.002, longitude: 106, radius_m: 80, coordinate_source: "device_gps", location_accuracy_m: 126, is_active: false},
 ];
 
 export const mockReviewPending: ReviewItem[] = [
