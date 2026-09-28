@@ -11,6 +11,7 @@ import {EmployeesScreen, PayrollScreen, ReviewScreen, WorkingScreen} from "../fe
 import {OutputsScreen} from "../features/outputs/OutputsScreen";
 import {ReportsScreen} from "../features/director/ReportsScreen";
 import {useTelegram} from "../hooks/useTelegram";
+import {useKeyboardAvoidance} from "../lib/keyboard";
 import type {Employee, TabKey} from "../types/api";
 import {AppShell, type SpecialScreen} from "./AppShell";
 
@@ -53,6 +54,7 @@ function MockToolbarHost({onChange}: {onChange: () => void}) {
 
 export function CrvApp() {
   useTelegram();
+  useKeyboardAvoidance();
   const [user, setUser] = useState<Employee>();
   const [tab, setTab] = useState<TabKey>("attendance");
   const [special, setSpecial] = useState<SpecialScreen>(null);

@@ -74,6 +74,7 @@ body,
 body {
   overflow-x: hidden;
   min-height: 100vh;
+  min-height: var(--tg-viewport-stable-height, 100vh);
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--crv-primary) 18%, transparent), transparent 34%),
     var(--crv-bg);
@@ -120,7 +121,7 @@ input:disabled {
 .app-shell {
   width: 100%;
   max-width: 680px;
-  min-height: 100vh;
+  min-height: var(--tg-viewport-stable-height, 100vh);
   margin: 0 auto;
   padding: max(18px, env(safe-area-inset-top)) 16px calc(94px + env(safe-area-inset-bottom));
 }
@@ -1007,6 +1008,22 @@ input:disabled {
   padding-bottom: calc(156px + env(safe-area-inset-bottom));
 }
 
+body.keyboard-open .app-shell {
+  min-height: var(--tg-viewport-height, var(--tg-viewport-stable-height, 100vh));
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+}
+
+body.keyboard-open .screen-stack {
+  padding-bottom: calc(180px + env(safe-area-inset-bottom));
+}
+
+body.keyboard-open .bottom-tabs,
+body.keyboard-open .sticky-action {
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(calc(100% + env(safe-area-inset-bottom)));
+}
+
 .date-nav button {
   width: 36px;
   height: 36px;
@@ -1260,6 +1277,7 @@ input:disabled {
   background: var(--crv-card);
   box-shadow: 0 -10px 30px var(--crv-shadow);
   padding: 8px 9px calc(8px + env(safe-area-inset-bottom));
+  transition: transform 0.16s ease, visibility 0.16s ease;
 }
 
 .search-field {
