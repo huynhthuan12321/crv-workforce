@@ -142,6 +142,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
             <Chip tone="success">Đang trong ca</Chip>
           </div>
           {gps && <div className={`gps-banner gps-banner--${gps.tone}`}>{gps.text}</div>}
+          {open.location_name_snapshot && <p className="location-note">Kho: <b>{open.location_code_snapshot} · {open.location_name_snapshot}</b></p>}
           <div className="timer-block">
             <span>Vào ca lúc</span>
             <b>{new Intl.DateTimeFormat("vi-VN", {timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false}).format(new Date(open.check_in_at))}</b>
@@ -184,6 +185,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
           </span>
         </div>
         <h2 className="hero-card__headline">{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
+        {today.work_location && <p className="location-note">Kho hôm nay: <b>{today.work_location.code} · {today.work_location.name}</b></p>}
         <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn VÀO CA khi bắt đầu làm việc. Ứng dụng sẽ lấy vị trí của bạn tại thời điểm này."}</p>
         {error && <p className="form-error">{error}</p>}
         <button

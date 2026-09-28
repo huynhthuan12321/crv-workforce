@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -27,6 +27,8 @@ from source.database.models import (
     WorkSessionOrm,
     NotificationOutboxOrm,
     AuditLogOrm,
+    EmployeeLocationAssignmentOrm,
+    WorkLocationOrm,
 )
 from source.enums import EmployeeRole, SessionStatus
 from source.services.rate_limit import attendance_rate_limiter
@@ -73,6 +75,7 @@ async def pg_factory():
         pytest.skip("TEST_DATABASE_URL is not set")
     engine = create_async_engine(url, pool_pre_ping=True, poolclass=NullPool)
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS btree_gist"))
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -107,6 +110,19 @@ async def api_client(pg_factory, monkeypatch):
 
 
 async def seed_actor(session, code: str, role: EmployeeRole, telegram_id: int | None = None) -> EmployeeOrm:
+    location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.code == "KHO01"))
+    if not location:
+        location = WorkLocationOrm(
+            code="KHO01",
+            name="Xưởng chính",
+            latitude=Decimal("10.0"),
+            longitude=Decimal("106.0"),
+            radius_m=100,
+            coordinate_source="manual_coordinates",
+            is_active=True,
+        )
+        session.add(location)
+        await session.flush()
     row = EmployeeOrm(
         code=code,
         full_name=code,
@@ -116,6 +132,14 @@ async def seed_actor(session, code: str, role: EmployeeRole, telegram_id: int | 
     )
     session.add(row)
     await session.flush()
+    if role == EmployeeRole.employee:
+        session.add(EmployeeLocationAssignmentOrm(
+            employee_id=row.id,
+            location_id=location.id,
+            effective_from=NOW - timedelta(days=1),
+            reason="test default assignment",
+        ))
+        await session.flush()
     return row
 
 
@@ -155,6 +179,12 @@ def work_session(
         check_out_lng=Decimal("106.0") if check_out else None,
         check_out_accuracy_m=Decimal("10") if check_out else None,
         check_out_distance_m=Decimal("0") if check_out else None,
+        work_location_id=1,
+        location_code_snapshot="KHO01",
+        location_name_snapshot="Xưởng chính",
+        location_lat_snapshot=Decimal("10.0"),
+        location_lng_snapshot=Decimal("106.0"),
+        location_radius_m_snapshot=100,
         rate_snapshot=30_000,
         minutes=minutes,
         amount_raw=(Decimal(minutes) * Decimal(30_000) / Decimal(60)) if minutes is not None else None,

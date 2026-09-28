@@ -44,19 +44,21 @@ class EditBody(BaseModel):
 @router.get("/pending", response_model=DataResponse[list[ReviewSessionOut]])
 async def pending(
     type: str | None = Query(default=None, pattern="^(gps|forgot)$"),
+    location_id: int | None = Query(default=None),
     _: EmployeeOrm = Depends(manager_or_director),
     session: AsyncSession = Depends(get_session),
 ):
-    return {"data": await ReviewService(session).pending(type)}
+    return {"data": await ReviewService(session).pending(type, location_id)}
 
 
 @router.get("/resolved", response_model=DataResponse[list[ReviewResolvedOut]])
 async def resolved(
     type: str | None = Query(default=None, pattern="^(gps|forgot)$"),
+    location_id: int | None = Query(default=None),
     _: EmployeeOrm = Depends(manager_or_director),
     session: AsyncSession = Depends(get_session),
 ):
-    return {"data": await ReviewService(session).list_resolved(type)}
+    return {"data": await ReviewService(session).list_resolved(type, location_id)}
 
 
 @router.post("/{session_id}/flags-reviewed", response_model=DataResponse[WorkSessionOut])

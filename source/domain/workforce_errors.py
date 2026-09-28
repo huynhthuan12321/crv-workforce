@@ -40,6 +40,11 @@ MESSAGES = {
     "INVALID_EMPLOYEE_DATA": "Dữ liệu nhân viên không hợp lệ.",
     "RATE_DATE_IN_PAST": "Ngày hiệu lực không được trước hôm nay.",
     "RATE_DATE_EXISTS": "Ngày hiệu lực này đã có đơn giá.",
+    "LOCATION_REQUIRED": "Nhân viên chưa được phân công kho.",
+    "LOCATION_NOT_FOUND": "Không tìm thấy kho.",
+    "LOCATION_INACTIVE": "Kho đã ngừng dùng. Liên hệ quản lý.",
+    "LOCATION_IN_USE": "Kho đang được sử dụng.",
+    "LOCATION_INVALID": "Dữ liệu kho không hợp lệ.",
 }
 
 

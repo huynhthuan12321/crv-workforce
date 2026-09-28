@@ -1,6 +1,6 @@
 # Đồng bộ Lark qua sync_outbox
 
-Mỗi payload trong `sync_outbox.payload` có `event_id` UUID để n8n/Lark chống ghi trùng. Backend ghi outbox trong cùng transaction với thay đổi nghiệp vụ; nếu transaction rollback thì không có sự kiện được gửi.
+Mỗi payload trong `sync_outbox.payload` có `event_id` UUID để n8n/Lark chống ghi trùng. Backend ghi outbox trong cùng transaction với thay đổi nghiệp vụ; nếu transaction rollback thì không có sự kiện được gửi. Từ SPEC 2.17, payload dùng `schema_version = 2` và đưa thông tin nhân viên/kho/phiên vào cấu trúc lồng.
 
 Khi gửi webhook, worker gửi thêm:
 
@@ -29,25 +29,30 @@ worker gửi event E tới n8n
 
 ## Payload sự kiện
 
-### `session_closed`
+### `session_closed` (`schema_version = 2`)
 
 ```json
 {
+  "schema_version": 2,
   "event_id": "uuid",
-  "session_id": 123,
-  "employee_id": 1,
-  "employee_code": "NV001",
-  "employee_name": "Nguyễn Văn A",
-  "work_date": "2026-09-26",
-  "check_in_at": "2026-09-26T06:12:00+07:00",
-  "check_out_at": "2026-09-26T11:35:00+07:00",
-  "minutes": 323,
-  "rate_snapshot": 30000,
-  "amount_raw": "161500.0000",
-  "flags": [],
-  "closed_by": 1,
-  "paid": false,
-  "output": []
+  "event_type": "session_closed",
+  "occurred_at": "2026-09-26T11:35:00+07:00",
+  "employee": {"id": 1, "code": "NV001", "name": "Nguyễn Văn A"},
+  "location": {"id": 1, "code": "KHO01", "name": "Xưởng chính"},
+  "session": {
+    "id": 123,
+    "work_date": "2026-09-26",
+    "check_in_at": "2026-09-26T06:12:00+07:00",
+    "check_out_at": "2026-09-26T11:35:00+07:00",
+    "minutes": 323,
+    "rate_snapshot": 30000,
+    "amount_raw": "161500.0000",
+    "flags": [],
+    "flag_source": null,
+    "closed_by": 1,
+    "paid": false,
+    "output": []
+  }
 }
 ```
 
@@ -57,9 +62,13 @@ Giống `session_closed`, bổ sung thông tin thay đổi:
 
 ```json
 {
+  "schema_version": 2,
   "event_id": "uuid",
-  "session_id": 123,
-  "employee_id": 1,
+  "event_type": "session_updated",
+  "occurred_at": "2026-09-26T11:40:00+07:00",
+  "employee": {"id": 1, "code": "NV001", "name": "Nguyễn Văn A"},
+  "location": {"id": 1, "code": "KHO01", "name": "Xưởng chính"},
+  "session": {"id": 123},
   "old": {
     "check_in_at": "2026-09-26T06:12:00+07:00",
     "check_out_at": "2026-09-26T11:35:00+07:00",
@@ -80,17 +89,21 @@ Giống `session_closed`, bổ sung thông tin thay đổi:
 
 ```json
 {
+  "schema_version": 2,
   "event_id": "uuid",
-  "batch_id": 10,
-  "employee_id": 1,
-  "employee_code": "NV001",
-  "employee_name": "Nguyễn Văn A",
-  "work_date": "2026-09-26",
-  "batch_no": 1,
-  "amount": 162000,
-  "approved_by": 2,
-  "approved_at": "2026-09-26T12:00:00+07:00",
-  "session_ids": [123]
+  "event_type": "batch_paid",
+  "occurred_at": "2026-09-26T12:00:00+07:00",
+  "employee": {"id": 1, "code": "NV001", "name": "Nguyễn Văn A"},
+  "locations": [{"id": 1, "code": "KHO01", "name": "Xưởng chính"}],
+  "batch": {
+    "id": 10,
+    "work_date": "2026-09-26",
+    "batch_no": 1,
+    "amount": 162000,
+    "approved_by": 2,
+    "approved_at": "2026-09-26T12:00:00+07:00"
+  },
+  "sessions": [{"id": 123, "location_id": 1}]
 }
 ```
 
@@ -98,8 +111,13 @@ Giống `session_closed`, bổ sung thông tin thay đổi:
 
 ```json
 {
+  "schema_version": 2,
   "event_id": "uuid",
-  "session_id": 123,
+  "event_type": "output_submitted",
+  "occurred_at": "2026-09-26T11:40:00+07:00",
+  "employee": {"id": 1, "code": "NV001", "name": "Nguyễn Văn A"},
+  "location": {"id": 1, "code": "KHO01", "name": "Xưởng chính"},
+  "session": {"id": 123},
   "items": {
     "BOT": 5,
     "XUC_XICH": 3,

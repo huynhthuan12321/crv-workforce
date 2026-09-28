@@ -40,6 +40,31 @@ export type WorkSession = {
   check_in_distance_m: number;
   check_out_accuracy_m?: number | null;
   check_out_distance_m: number | null;
+  work_location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
+  location_code_snapshot?: string | null;
+  location_name_snapshot?: string | null;
+  nearby_location_id?: number | null;
+  nearby_location_distance_m?: number | null;
+  nearby_location_code?: string | null;
+  nearby_location_name?: string | null;
+};
+
+export type WorkLocation = {
+  id: number;
+  code: string;
+  name: string;
+  location_type: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  coordinate_source: "device_gps" | "manual_coordinates" | string;
+  location_accuracy_m: number | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type Today = {
@@ -49,6 +74,7 @@ export type Today = {
   server_now: string;
   checkin_cutoff: string;
   can_check_in: boolean;
+  work_location?: WorkLocation | null;
 };
 
 export type Consent = {
@@ -143,6 +169,12 @@ export type WorkingNowItem = {
   check_in_accuracy_m: number | null;
   check_out_distance_m?: number | null;
   check_out_accuracy_m?: number | null;
+  location_code_snapshot?: string | null;
+  location_name_snapshot?: string | null;
+  nearby_location_id?: number | null;
+  nearby_location_distance_m?: number | null;
+  nearby_location_code?: string | null;
+  nearby_location_name?: string | null;
   is_outside: boolean;
   server_now: string;
 };
@@ -184,6 +216,10 @@ export type PayrollSummary = {
   needs_review_session_ids: number[];
   pending_reason: "open_session" | "unreviewed_gps" | "forgot_checkout" | null;
   pending_reasons: Array<"open_session" | "unreviewed_gps" | "forgot_checkout" | string>;
+  work_location_ids?: number[];
+  work_location_names?: string[];
+  day_locations?: Array<{id: number; code: string | null; name: string | null}>;
+  has_multiple_locations?: boolean;
 };
 
 export type PayrollSession = WorkSession & {
@@ -215,6 +251,7 @@ export type ManagedEmployee = Employee & {
   current_hourly_rate: number | null;
   is_linked: boolean;
   has_open_session: boolean;
+  work_location?: WorkLocation | null;
   invite_url?: string | null;
 };
 

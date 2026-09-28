@@ -6,8 +6,10 @@ import {periodBounds, periodLabel, shiftPeriod, type ReportPeriod} from "../../l
 import {fmtHours, fmtKg} from "../../lib/report-format";
 import {hapticImpact} from "../../lib/haptic";
 import {todayVN} from "../../lib/date-vn";
-import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries} from "../../types/api";
+import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries, WorkLocation} from "../../types/api";
 import {useBackButton} from "../manager/shared";
+import {LocationsScreen} from "../manager/employees/EmployeesScreen";
+import {LocationFilterChips} from "../locations/LocationFilterChips";
 
 function reportMockScenario() {
   if (!(import.meta.env.DEV && import.meta.env.VITE_MOCK === "1")) return "";
@@ -69,7 +71,9 @@ export function ReportsScreen() {
   const [period, setPeriod] = useState<ReportPeriod>(initialPeriod);
   const [date, setDate] = useState(today);
   const [employee, setEmployee] = useState<ReportEmployee | null>(null);
+  const [location, setLocation] = useState<WorkLocation | null>(null);
   const [picker, setPicker] = useState(scenario === mockKey("director", "report", "employees"));
+  const [catalog, setCatalog] = useState(false);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [series, setSeries] = useState<ReportTimeseries[]>([]);
   const [products, setProducts] = useState<ProductTotal[]>([]);
@@ -78,7 +82,7 @@ export function ReportsScreen() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const query = `period=${period}&date=${date}${employee ? `&employee_id=${employee.id}` : ""}`;
+      const query = `period=${period}&date=${date}${employee ? `&employee_id=${employee.id}` : ""}${location ? `&location_id=${location.id}` : ""}`;
       const [nextSummary, nextSeries, nextProducts] = await Promise.all([
         api.get<ReportSummary>(`/reports/summary?${query}`),
         api.get<ReportTimeseries[]>(`/reports/timeseries?${query}`),
@@ -87,13 +91,14 @@ export function ReportsScreen() {
       setSummary(nextSummary); setSeries(nextSeries); setProducts(nextProducts);
     } catch (err) { setError(err instanceof Error ? err.message : "Không tải được báo cáo"); }
     finally { setLoading(false); }
-  }, [date, employee, period]);
+  }, [date, employee, location, period]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (scenario !== mockKey("director", "report", "filtered")) return;
     void api.get<ReportEmployee[]>("/reports/employees").then((rows) => setEmployee(rows[0] ?? null));
   }, [scenario]);
-  useBackButton(picker, () => setPicker(false));
+  useBackButton(picker || catalog, () => { setPicker(false); setCatalog(false); });
+  if (catalog) return <LocationsScreen onBack={() => setCatalog(false)} canAssignEmployees={false} />;
   if (picker) return <EmployeePicker selected={employee} onSelect={setEmployee} onClose={() => setPicker(false)} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải báo cáo" />;
   if (error) return <ScreenState kind="error" title="Không tải được báo cáo" message={error} onRetry={load} />;
@@ -102,19 +107,21 @@ export function ReportsScreen() {
   const bounds = periodBounds(period, date);
   const canNext = bounds.to < today;
   return <div className="screen-stack reports-screen">
-    <SectionTitle eyebrow="Báo cáo" title="Tổng quan" />
+    <SectionTitle eyebrow="Báo cáo" title="Tổng quan" action={<Button tone="secondary" className="small-button" onClick={() => setCatalog(true)}>Danh mục → Kho</Button>} />
     <div className="segmented">{(["day", "week", "month"] as const).map((key) => <button key={key} className={period === key ? "active" : ""} onClick={() => { hapticImpact(); setPeriod(key); }}>{key === "day" ? "Ngày" : key === "week" ? "Tuần" : "Tháng"}</button>)}</div>
     <div className="report-period-nav"><button onClick={() => setDate(shiftPeriod(period, date, -1))}>‹</button><b>{periodLabel(period, date)}</b><button disabled={!canNext} onClick={() => setDate(shiftPeriod(period, date, 1))}>›</button></div>
     <button className="filter-chip" onClick={() => setPicker(true)}>{employee ? `${employee.code} · ${employee.full_name} ✕` : "Tất cả nhân viên"}</button>
+    <LocationFilterChips value={location?.id ?? null} onChange={(_, next) => setLocation(next ?? null)} />
     <div className="mini-grid"><Metric label="Giờ công" value={fmtHours(summary.minutes)} /><Metric label="Tổng túi" value={summary.bags.toLocaleString("vi-VN")} /><Metric label="Tổng kg" value={fmtKg(summary.kg)} /></div>
     <Card>
-      <SectionTitle title="Lương" />
+      <SectionTitle title={location ? "Chi phí theo phiên (chưa làm tròn)" : "Lương"} />
       <div className="salary-total"><Metric label="Tổng" value={fmtMoney(summary.total)} /></div>
-      <div className="mini-grid mini-grid--three">
+      {!location && <div className="mini-grid mini-grid--three">
         <Metric label="Đã trả" value={fmtMoney(summary.paid)} tone="success" />
         <Metric label="Chờ duyệt" value={fmtMoney(summary.pending_eligible)} tone="warning" />
         <Metric label="Cần xử lý" value={fmtMoney(summary.pending_blocked)} tone="info" />
-      </div>
+      </div>}
+      {location && <p className="muted">Lương làm tròn theo ngày của từng nhân viên nên tổng các kho có thể chênh vài nghìn đồng so với Tất cả kho.</p>}
       {summary.needs_review_count > 0 && <p className="muted">{summary.needs_review_count} phiên quên ra ca chưa có giờ ra.</p>}
     </Card>
     <Card><SectionTitle title="Biểu đồ theo ngày" /><ReportChart rows={series} /></Card>

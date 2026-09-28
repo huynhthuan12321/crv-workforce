@@ -1,5 +1,5 @@
 from datetime import date
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,8 +18,8 @@ class ApproveBody(BaseModel):
 
 
 @router.get("", response_model=DataResponse[list[PayrollSummaryOut]])
-async def list_payroll(date: date, _: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
-    return {"data": await PayrollService(session).list_payroll(date)}
+async def list_payroll(date: date, location_id: int | None = Query(default=None), _: EmployeeOrm = Depends(manager_or_director), session: AsyncSession = Depends(get_session)):
+    return {"data": await PayrollService(session).list_payroll(date, location_id)}
 
 
 @router.get("/{employee_id}")

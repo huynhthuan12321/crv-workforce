@@ -18,6 +18,7 @@ class EmployeeBody(BaseModel):
     full_name: str = Field(min_length=2, max_length=200)
     hourly_rate: int = Field(gt=0)
     effective_from: date
+    location_id: int | None = None
 
 
 class RateBody(BaseModel):
@@ -37,7 +38,7 @@ async def employees(
 
 @router.post("")
 async def add(body: EmployeeBody, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    return {"data": await EmployeeService(session).create(actor, body.code, body.full_name, body.hourly_rate, body.effective_from)}
+    return {"data": await EmployeeService(session).create(actor, body.code, body.full_name, body.hourly_rate, body.effective_from, body.location_id)}
 
 
 @router.post("/{employee_id}/lock", response_model=DataResponse[EmployeeOut])

@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime,
     Enum, ForeignKey, Index, Integer, JSON, Numeric, String, Text,
     UniqueConstraint, func, text)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ExcludeConstraint, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
@@ -78,6 +78,51 @@ class ProductOrm(Base):
     sort_order: Mapped[int] = mapped_column(Integer)
 
 
+class WorkLocationOrm(Base, TimestampMixin):
+    __tablename__ = "work_locations"
+    __table_args__ = (
+        CheckConstraint("latitude >= 8 AND latitude <= 24", name="ck_work_locations_lat_vietnam"),
+        CheckConstraint("longitude >= 102 AND longitude <= 110", name="ck_work_locations_lng_vietnam"),
+        CheckConstraint("radius_m >= 30 AND radius_m <= 1000", name="ck_work_locations_radius"),
+        CheckConstraint("coordinate_source IN ('device_gps', 'manual_coordinates')", name="ck_work_locations_coordinate_source"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    location_type: Mapped[str] = mapped_column(String(32), default="warehouse", server_default=text("'warehouse'"))
+    address: Mapped[str | None] = mapped_column(Text)
+    latitude: Mapped[Decimal] = mapped_column(Numeric(10, 7))
+    longitude: Mapped[Decimal] = mapped_column(Numeric(10, 7))
+    radius_m: Mapped[int] = mapped_column(Integer)
+    coordinate_source: Mapped[str] = mapped_column(String(32))
+    location_accuracy_m: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+
+
+class EmployeeLocationAssignmentOrm(Base):
+    __tablename__ = "employee_location_assignments"
+    __table_args__ = (
+        CheckConstraint("effective_to IS NULL OR effective_to > effective_from", name="ck_employee_location_assignment_time"),
+        Index("uq_employee_location_assignment_current", "employee_id", unique=True,
+              postgresql_where=text("effective_to IS NULL"), sqlite_where=text("effective_to IS NULL")),
+        ExcludeConstraint(
+            ("employee_id", "="),
+            (text("tstzrange(effective_from, effective_to, '[)')"), "&&"),
+            name="ex_employee_location_assignments_no_overlap",
+            using="gist",
+        ).ddl_if(dialect="postgresql"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("work_locations.id"), index=True)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    changed_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WorkSessionOrm(Base, TimestampMixin):
     __tablename__ = "work_sessions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -93,6 +138,15 @@ class WorkSessionOrm(Base, TimestampMixin):
     check_out_lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     check_out_accuracy_m: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     check_out_distance_m: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    work_location_id: Mapped[int] = mapped_column(ForeignKey("work_locations.id"), index=True, default=1)
+    location_code_snapshot: Mapped[str] = mapped_column(String(32), default="KHO01")
+    location_name_snapshot: Mapped[str] = mapped_column(String(200), default="Xưởng chính")
+    location_lat_snapshot: Mapped[Decimal] = mapped_column(Numeric(10, 7), default=Decimal("10.0"))
+    location_lng_snapshot: Mapped[Decimal] = mapped_column(Numeric(10, 7), default=Decimal("106.0"))
+    location_radius_m_snapshot: Mapped[int] = mapped_column(Integer, default=100)
+    flag_source: Mapped[str | None] = mapped_column(String(16))
+    nearby_location_id: Mapped[int | None] = mapped_column(ForeignKey("work_locations.id"), index=True)
+    nearby_location_distance_m: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     rate_snapshot: Mapped[int] = mapped_column(Integer)
     minutes: Mapped[int | None] = mapped_column(Integer)
     amount_raw: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))

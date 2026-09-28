@@ -75,8 +75,8 @@ class AuthSettings(NestedSettings):
 
 
 class WorkshopSettings(NestedSettings):
-    lat: float
-    lng: float
+    lat: float = 10.0
+    lng: float = 106.0
     radius_m: int = 100
 
 

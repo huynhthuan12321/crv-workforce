@@ -4,23 +4,25 @@ import {Card, Chip, ScreenState, SectionTitle} from "../../../components/ui";
 import {fmtDuration, fmtTime} from "../../../lib/date-vn";
 import {gpsLabel} from "../../../lib/gps-label";
 import type {WorkingNowItem} from "../../../types/api";
+import {LocationFilterChips} from "../../locations/LocationFilterChips";
 import {errorText} from "../shared";
 
 export function WorkingScreen() {
   const [rows, setRows] = useState<WorkingNowItem[]>([]);
+  const [locationId, setLocationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      setRows(await api.get<WorkingNowItem[]>("/working-now"));
+      setRows(await api.get<WorkingNowItem[]>(`/working-now${locationId ? `?location_id=${locationId}` : ""}`));
     } catch (err) {
       setError(errorText(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locationId]);
 
   useEffect(() => {
     void load();
@@ -34,6 +36,7 @@ export function WorkingScreen() {
   return (
     <div className="screen-stack">
       <SectionTitle eyebrow="Đang làm" title={`Trong ca (${rows.length})`} />
+      <LocationFilterChips value={locationId} onChange={setLocationId} />
       {rows.length === 0 && <ScreenState kind="empty" title="Chưa có ai trong ca" message="Danh sách sẽ tự làm mới mỗi 60 giây." />}
       {rows.map((row) => {
         return (

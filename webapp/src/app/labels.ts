@@ -7,7 +7,7 @@ export const tabLabels: Record<TabKey, string> = {
   working: "Đang làm",
   review: "Cần xử lý",
   payroll: "Duyệt lương",
-  employees: "Nhân viên",
+  employees: "Quản lý",
   reports: "Báo cáo",
 };
 

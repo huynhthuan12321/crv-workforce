@@ -19,6 +19,8 @@ from source.database.models import (
     ProductOrm,
     RateHistoryOrm,
     SyncOutboxOrm,
+    EmployeeLocationAssignmentOrm,
+    WorkLocationOrm,
     WorkSessionOrm,
 )
 from source.domain.workforce_errors import WorkforceError
@@ -50,6 +52,13 @@ async def make_employee(
     rate: int = 30_000,
     role: EmployeeRole = EmployeeRole.employee,
 ) -> EmployeeOrm:
+    location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.code == "KHO01"))
+    if not location:
+        location = WorkLocationOrm(code="KHO01", name="Xưởng chính", latitude=Decimal("10.0"),
+                                   longitude=Decimal("106.0"), radius_m=100,
+                                   coordinate_source="manual_coordinates", is_active=True)
+        session.add(location)
+        await session.flush()
     employee = EmployeeOrm(code=code, full_name=name, role=role, is_active=True)
     session.add(employee)
     await session.flush()
@@ -58,6 +67,9 @@ async def make_employee(
         hourly_rate=rate,
         effective_from=date(2026, 1, 1),
     ))
+    if role == EmployeeRole.employee:
+        session.add(EmployeeLocationAssignmentOrm(employee_id=employee.id, location_id=location.id,
+                                                 effective_from=dt(0, 0), reason="test"))
     await session.flush()
     return employee
 
@@ -116,6 +128,12 @@ async def closed_session(
         check_out_lng=Decimal("106.0"),
         check_out_accuracy_m=Decimal("10"),
         check_out_distance_m=Decimal("0"),
+        work_location_id=1,
+        location_code_snapshot="KHO01",
+        location_name_snapshot="Xưởng chính",
+        location_lat_snapshot=Decimal("10.0"),
+        location_lng_snapshot=Decimal("106.0"),
+        location_radius_m_snapshot=100,
         rate_snapshot=rate,
         minutes=minutes,
         amount_raw=Decimal(minutes) * Decimal(rate) / Decimal(60),
