@@ -924,7 +924,8 @@ input:disabled {
 }
 
 .form-field input,
-.form-field textarea {
+.form-field textarea,
+.form-field select {
   width: 100%;
   border: 1px solid var(--crv-border);
   border-radius: 15px;
@@ -934,7 +935,8 @@ input:disabled {
 }
 
 .form-field input.input-error,
-.form-field textarea.input-error {
+.form-field textarea.input-error,
+.form-field select.input-error {
   border-color: var(--crv-danger);
 }
 

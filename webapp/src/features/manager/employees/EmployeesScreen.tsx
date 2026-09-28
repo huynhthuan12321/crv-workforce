@@ -1,11 +1,11 @@
 import {useCallback, useEffect, useState} from "react";
 import {ApiError, api} from "../../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../components/ui";
-import {fmtDate, todayVN} from "../../../lib/date-vn";
+import {fmtDate, fmtTime, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
 import {hapticNotify} from "../../../lib/haptic";
 import {getCurrentLocation} from "../../../lib/location";
-import type {ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
+import type {EmployeeLocationHistory, ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
 import {errorText, useBackButton} from "../shared";
 
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
@@ -19,13 +19,20 @@ function mockKey(...parts: string[]) {
   return parts.join("_");
 }
 
+function fmtDateTime(value?: string | null) {
+  if (!value) return "đến nay";
+  return `${fmtDate(value, {day: "2-digit", month: "2-digit", year: "numeric"})} ${fmtTime(value)}`;
+}
+
 export function EmployeesScreen() {
   const scenario = mockScenario();
   const [rows, setRows] = useState<ManagedEmployee[]>([]);
   const [q, setQ] = useState("");
   const [active, setActive] = useState<"all" | "active" | "locked">("all");
-  const [subtab, setSubtab] = useState<"employees" | "locations">("employees");
-  const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
+  const [locationFilter, setLocationFilter] = useState<number | "all">("all");
+  const [locations, setLocations] = useState<WorkLocation[]>([]);
+  const [subtab, setSubtab] = useState<"employees" | "locations">(scenario === mockKey("manager", "locations") ? "locations" : "employees");
+  const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario.startsWith(mockKey("manager", "employee", "assign")) || scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
   const [selected, setSelected] = useState<ManagedEmployee | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +44,12 @@ export function EmployeesScreen() {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (active !== "all") params.set("active", active === "active" ? "true" : "false");
-      const data = await api.get<ManagedEmployee[]>(`/employees${params.toString() ? `?${params}` : ""}`);
+      const [data, locationRows] = await Promise.all([
+        api.get<ManagedEmployee[]>(`/employees${params.toString() ? `?${params}` : ""}`),
+        api.get<WorkLocation[]>("/locations?active=true"),
+      ]);
       setRows(data);
+      setLocations(locationRows);
       if (!selected) setSelected(data[0] ?? null);
     } catch (err) {
       setError(errorText(err));
@@ -69,6 +80,8 @@ export function EmployeesScreen() {
     }
   };
 
+  const visibleRows = rows.filter((row) => locationFilter === "all" || (row.current_location?.id ?? row.work_location?.id) === locationFilter);
+
   return (
     <div className="screen-stack">
       <SectionTitle eyebrow="Nhân viên" title="Danh sách nhân viên" action={<Button className="small-button" onClick={() => setScreen("add")}>Thêm</Button>} />
@@ -83,14 +96,20 @@ export function EmployeesScreen() {
           <button className={active === "active" ? "active" : ""} onClick={() => setActive("active")}>Đang hoạt động</button>
           <button className={active === "locked" ? "active" : ""} onClick={() => setActive("locked")}>Đã khóa</button>
         </div>
+        <div className="location-chip-row">
+          <Button className="small-button" tone={locationFilter === "all" ? "primary" : "secondary"} onClick={() => setLocationFilter("all")}>Tất cả kho</Button>
+          {locations.map((location) => (
+            <Button key={location.id} className="small-button" tone={locationFilter === location.id ? "primary" : "secondary"} onClick={() => setLocationFilter(location.id)}>{location.code}</Button>
+          ))}
+        </div>
       </Card>
-      {rows.map((row) => (
+      {visibleRows.map((row) => (
         <Card key={row.id} className="manager-card">
           <div className="manager-row">
             <button className="plain-button" onClick={() => { setSelected(row); setScreen("detail"); }}>
               <b>{row.full_name}</b>
               <small>{row.code} · {fmtMoney(row.current_hourly_rate ?? 0)}/giờ</small>
-              {row.work_location && <small>Kho: {row.work_location.code} · {row.work_location.name}</small>}
+              {(row.current_location || row.work_location) && <small>Kho: {row.current_location?.code ?? row.work_location?.code} · {row.current_location?.name ?? row.work_location?.name}</small>}
             </button>
             <button type="button" className={`switch ${row.is_active ? "on" : ""}`} aria-label={row.is_active ? "Khóa" : "Mở khóa"} onClick={() => void toggleLock(row)} />
           </div>
@@ -98,6 +117,7 @@ export function EmployeesScreen() {
             {!row.is_linked && <Chip tone="warning">Chưa liên kết</Chip>}
             {row.has_open_session && <Chip tone="info">Đang trong ca</Chip>}
             {!row.is_active && <Chip tone="danger">Đã khóa</Chip>}
+            {(row.current_location || row.work_location) && <Chip tone="neutral">{row.current_location?.code ?? row.work_location?.code}</Chip>}
           </div>
         </Card>
       ))}
@@ -125,6 +145,7 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expandedLocation, setExpandedLocation] = useState<number | null>(null);
   const canSaveLocation = form.code.trim().length > 0 && form.name.trim().length > 0;
 
   const load = useCallback(async () => {
@@ -230,6 +251,7 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
         <div>
           <b>{row.code} · {row.name}</b>
           <small>{row.latitude.toFixed(6)}, {row.longitude.toFixed(6)} · bán kính {row.radius_m} m</small>
+          <small>{row.current_employee_count ?? 0} nhân viên đang phân công</small>
         </div>
         <Chip tone={row.is_active ? "success" : "danger"}>{row.is_active ? "Đang dùng" : "Ngừng dùng"}</Chip>
       </div>
@@ -241,22 +263,38 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
           setNeedConfirm(false);
         }}>Sửa</Button>
         <Button tone="secondary" onClick={() => void toggle(row)}>{row.is_active ? "Ngừng dùng" : "Dùng lại"}</Button>
+        <Button tone="secondary" onClick={() => setExpandedLocation(expandedLocation === row.id ? null : row.id)}>Danh sách nhân viên</Button>
       </div>
+      {expandedLocation === row.id && (
+        <div className="history-block">
+          {(row.current_employees ?? []).length === 0
+            ? <p className="muted">Chưa có nhân viên đang phân công.</p>
+            : (row.current_employees ?? []).map((employee) => <div className="session-row" key={employee.id}><span>{employee.full_name}</span><small>{employee.code}</small></div>)}
+        </div>
+      )}
       {!canAssignEmployees && <p className="muted">Giám đốc chỉ quản lý danh mục kho, không phân công nhân viên tại đây.</p>}
     </Card>)}
   </div>;
 }
 
 function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onCreated: (url: string) => void; invite: string | null}) {
-  const [form, setForm] = useState({code: "", full_name: "", hourly_rate: 30000, effective_from: todayVN()});
+  const [form, setForm] = useState({code: "", full_name: "", hourly_rate: 30000, effective_from: todayVN(), location_id: ""});
+  const [locations, setLocations] = useState<WorkLocation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setField = (key: keyof typeof form, value: string | number) => setForm((current) => ({...current, [key]: value}));
+  useEffect(() => {
+    void api.get<WorkLocation[]>("/locations?active=true").then(setLocations).catch((err) => setError(errorText(err)));
+  }, []);
   const submit = async () => {
+    if (!form.location_id) {
+      setError("Vui lòng chọn kho chấm công.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const created = await api.post<ManagedEmployee>("/employees", form);
+      const created = await api.post<ManagedEmployee>("/employees", {...form, location_id: Number(form.location_id)});
       hapticNotify("success");
       onCreated(created.invite_url || "");
     } catch (err) {
@@ -275,9 +313,10 @@ function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onC
         <label className="form-field">Mã nhân viên<input value={form.code} onChange={(event) => setField("code", event.target.value)} /></label>
         <label className="form-field">Họ tên<input value={form.full_name} onChange={(event) => setField("full_name", event.target.value)} /></label>
         <label className="form-field">Đơn giá giờ<input type="number" value={form.hourly_rate} onChange={(event) => setField("hourly_rate", Number(event.target.value))} /></label>
+        <label className="form-field">Kho chấm công<select value={form.location_id} onChange={(event) => setField("location_id", event.target.value)}><option value="">Chọn kho</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</select></label>
         <label className="form-field">Hiệu lực từ ngày<input type="date" min={todayVN()} value={form.effective_from} onChange={(event) => setField("effective_from", event.target.value)} /><small className="date-label">{new Intl.DateTimeFormat("vi-VN", {timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric"}).format(new Date(`${form.effective_from}T12:00:00+07:00`))}</small></label>
         {error && <p className="form-error">{error}</p>}
-        <Button busy={busy} onClick={submit}>Tạo nhân viên</Button>
+        <Button busy={busy} disabled={!form.location_id} onClick={submit}>Tạo nhân viên</Button>
         {invite && (
           <div className="invite-box">
             <b>Link mời</b>
@@ -294,8 +333,15 @@ function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onC
 }
 
 function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedEmployee | null; onBack: () => void; onChanged: () => void}) {
+  const scenario = mockScenario();
   const [rates, setRates] = useState<RateHistory[]>([]);
   const [rate, setRate] = useState({hourly_rate: 32000, effective_from: todayVN()});
+  const [detail, setDetail] = useState<ManagedEmployee | null>(employee);
+  const [locations, setLocations] = useState<WorkLocation[]>([]);
+  const [history, setHistory] = useState<EmployeeLocationHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(true);
+  const [assigning, setAssigning] = useState(scenario.startsWith(mockKey("manager", "employee", "assign")));
+  const [assignment, setAssignment] = useState({location_id: "", reason: ""});
   const [invite, setInvite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -303,7 +349,16 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
   const load = useCallback(async () => {
     if (!employee) return;
     try {
-      setRates(await api.get<RateHistory[]>(`/employees/${employee.id}/rates`));
+      const [detailRow, rateRows, locationRows, historyRows] = await Promise.all([
+        api.get<ManagedEmployee>(`/employees/${employee.id}`),
+        api.get<RateHistory[]>(`/employees/${employee.id}/rates`),
+        api.get<WorkLocation[]>("/locations?active=true"),
+        api.get<EmployeeLocationHistory[]>(`/employees/${employee.id}/location-history`),
+      ]);
+      setDetail(detailRow);
+      setRates(rateRows);
+      setLocations(locationRows);
+      setHistory(historyRows);
     } catch (err) {
       setError(errorText(err));
     }
@@ -311,12 +366,15 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
 
   useEffect(() => void load(), [load]);
 
-  if (!employee) return <ScreenState kind="empty" title="Chưa chọn nhân viên" />;
+  if (!employee || !detail) return <ScreenState kind="empty" title="Chưa chọn nhân viên" />;
+
+  const currentLocation = detail.current_location ?? (detail.work_location ? {id: detail.work_location.id, code: detail.work_location.code, name: detail.work_location.name, effective_from: undefined} : null);
+  const otherLocations = locations.filter((location) => location.id !== currentLocation?.id);
 
   const saveRate = async () => {
     setBusy(true);
     try {
-      await api.post(`/employees/${employee.id}/rates`, rate);
+      await api.post(`/employees/${detail.id}/rates`, rate);
       hapticNotify("success");
       await load();
       onChanged();
@@ -329,16 +387,70 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
   };
 
   const regenerate = async () => {
-    const data = await api.post<ManagedEmployee>(`/employees/${employee.id}/invite`);
+    const data = await api.post<ManagedEmployee>(`/employees/${detail.id}/invite`);
     setInvite(data.invite_url || null);
   };
+
+  const assignLocation = async () => {
+    if (!assignment.location_id || assignment.reason.trim().length < 5) {
+      setError("Vui lòng chọn kho và nhập lý do từ 5 ký tự.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.post<ManagedEmployee>(`/locations/employees/${detail.id}/assignment`, {
+        location_id: Number(assignment.location_id),
+        reason: assignment.reason.trim(),
+      });
+      setDetail(updated);
+      setAssigning(false);
+      setAssignment({location_id: "", reason: ""});
+      hapticNotify("success");
+      await load();
+      onChanged();
+    } catch (err) {
+      hapticNotify("error");
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (assigning) {
+    return (
+      <div className="screen-stack">
+        <Button tone="ghost" className="back-button" onClick={() => setAssigning(false)}>← Quay lại</Button>
+        <Card>
+          <SectionTitle eyebrow={detail.code} title="Đổi kho chấm công" />
+          <p className="muted">Áp dụng từ lần vào ca tiếp theo. Ca đang mở giữ nguyên kho cũ.</p>
+          {detail.has_open_session && currentLocation && <p className="form-error">Nhân viên đang trong ca tại {currentLocation.code} · {currentLocation.name}</p>}
+          <label className="form-field">Kho mới<select value={assignment.location_id} onChange={(event) => setAssignment({...assignment, location_id: event.target.value})}><option value="">Chọn kho đang dùng</option>{otherLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</select></label>
+          <label className="form-field">Lý do<textarea value={assignment.reason} maxLength={200} onChange={(event) => setAssignment({...assignment, reason: event.target.value})} placeholder="Ví dụ: Điều chuyển sang kho đóng gói" /></label>
+          {error && <p className="form-error">{error}</p>}
+          <Button busy={busy} disabled={!assignment.location_id || assignment.reason.trim().length < 5} onClick={assignLocation}>Xác nhận đổi kho</Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="screen-stack">
       <Button tone="ghost" className="back-button" onClick={onBack}>← Quay lại</Button>
       <Card>
-        <SectionTitle eyebrow={employee.code} title={employee.full_name} />
-        <Metric label="Đơn giá hiện tại" value={`${fmtMoney(employee.current_hourly_rate ?? 0)}/giờ`} />
+        <SectionTitle eyebrow={detail.code} title={detail.full_name} />
+        <div className="history-block">
+          <div className="manager-row">
+            <div>
+              <b>Kho chấm công</b>
+              {currentLocation
+                ? <small>{currentLocation.code} · {currentLocation.name}{currentLocation.effective_from ? ` · từ ${fmtDateTime(currentLocation.effective_from)}` : ""}</small>
+                : <small>Chưa phân công kho</small>}
+            </div>
+            <Button className="small-button" tone="secondary" onClick={() => setAssigning(true)}>Đổi kho</Button>
+          </div>
+        </div>
+        <Metric label="Đơn giá hiện tại" value={`${fmtMoney(detail.current_hourly_rate ?? 0)}/giờ`} />
         <SectionTitle title="Thiết lập đơn giá giờ" />
         <div className="two-col">
           <label className="form-field">Nhập đơn giá (giờ)<input type="number" value={rate.hourly_rate} onChange={(event) => setRate({...rate, hourly_rate: Number(event.target.value)})} /></label>
@@ -350,7 +462,18 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
           <b>Lịch sử đơn giá</b>
           {rates.map((item) => <div className="session-row" key={item.id}><span>{fmtMoney(item.hourly_rate)}/giờ</span><small>Từ {fmtDate(`${item.effective_from}T12:00:00+07:00`)}</small></div>)}
         </div>
-        {!employee.is_linked && <Button tone="secondary" onClick={() => void regenerate()}>Tạo lại link mời</Button>}
+        <div className="history-block">
+          <button className="plain-button" onClick={() => setShowHistory(!showHistory)}><b>Lịch sử kho</b><small>{showHistory ? "Thu gọn" : "Mở rộng"}</small></button>
+          {showHistory && history.map((item) => (
+            <div className="session-row" key={item.id}>
+              <span>{item.location_code} · {item.location_name}</span>
+              <small>{fmtDateTime(item.effective_from)} – {fmtDateTime(item.effective_to)}</small>
+              {item.reason && <small>Lý do: {item.reason}</small>}
+              {item.changed_by_name && <small>Người đổi: {item.changed_by_name}</small>}
+            </div>
+          ))}
+        </div>
+        {!detail.is_linked && <Button tone="secondary" onClick={() => void regenerate()}>Tạo lại link mời</Button>}
         {invite && <p className="invite-box">{invite}</p>}
       </Card>
     </div>

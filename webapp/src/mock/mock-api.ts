@@ -4,6 +4,7 @@ import {
   mockConsent,
   mockEmployee,
   mockEmployees,
+  mockEmployeeLocationHistory,
   mockHistory,
   mockLocations,
   mockManager,
@@ -72,6 +73,12 @@ class MockApi {
     }
     if (path.startsWith("/reports/products")) return mockReportProducts as T;
     if (path.startsWith("/reports/timeseries")) return (this.scenario === "director_report_day" ? [mockReportSeries[1]] : mockReportSeries) as T;
+    if (path.startsWith("/locations/employees/") && path.endsWith("/assignment") && options.method === "POST") {
+      const employeeId = Number(path.split("/")[3]);
+      const employee = mockEmployees.find((item) => item.id === employeeId) ?? mockEmployees[0];
+      const target = mockLocations.find((item) => item.id !== employee.current_location?.id && item.is_active) ?? mockLocations[1];
+      return {...employee, current_location: {id: target.id, code: target.code, name: target.name, effective_from: new Date().toISOString()}, work_location: target} as T;
+    }
     if (path.startsWith("/locations") && options.method === "PATCH") return mockLocations[0] as T;
     if (path === "/locations" && options.method === "POST") return {...mockLocations[1], id: 9} as T;
     if (path.includes("/deactivate") || path.includes("/activate")) return mockLocations[0] as T;
@@ -115,6 +122,7 @@ class MockApi {
       {id: 1, hourly_rate: 30000, effective_from: "2024-04-24"},
       {id: 2, hourly_rate: 28000, effective_from: "2024-01-01"},
     ] as T;
+    if (path.startsWith("/employees/") && path.endsWith("/location-history")) return mockEmployeeLocationHistory as T;
     if (path.startsWith("/employees/1/invite") && options.method === "POST") return {...mockEmployees[0], invite_url: "https://t.me/crv_bot/app?startapp=invite-new"} as T;
     if (path.startsWith("/employees/") && path.endsWith("/lock") && options.method === "POST") {
       if (this.scenario === "manager_lock_open") throw new ApiError("EMPLOYEE_HAS_OPEN_SESSION", "Nhân viên đang trong ca, không thể khóa.", 409);
@@ -122,6 +130,13 @@ class MockApi {
     }
     if (path.startsWith("/employees/") && path.endsWith("/unlock") && options.method === "POST") return {...mockEmployees[2], is_active: true} as T;
     if (path === "/employees" && options.method === "POST") return {...mockEmployees[0], id: 9, code: "NV009", full_name: "Nhân viên mới", is_linked: false, invite_url: "https://t.me/crv_bot/app?startapp=invite-nv009"} as T;
+    if (/^\/employees\/\d+$/.test(path)) {
+      const employeeId = Number(path.split("/")[2]);
+      const employee = mockEmployees.find((item) => item.id === employeeId) ?? mockEmployees[0];
+      if (this.scenario === "manager_employee_assign") return {...employee, has_open_session: false} as T;
+      if (this.scenario === "manager_employee_assign_open") return {...employee, has_open_session: true} as T;
+      return employee as T;
+    }
     if (path.startsWith("/employees")) return mockEmployees as T;
     if (path === "/attendance/check-in" && options.method === "POST") {
       return todayForScenario("open").open_session as WorkSession as T;

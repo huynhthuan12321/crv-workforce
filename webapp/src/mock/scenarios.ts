@@ -43,6 +43,9 @@ export type MockScenario =
   | "manager_employees"
   | "manager_employee_add"
   | "manager_employee_detail"
+  | "manager_employee_assign"
+  | "manager_employee_assign_open"
+  | "manager_locations"
   | "manager_lock_open"
   | "director_report_day"
   | "director_report_week"
@@ -84,6 +87,9 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_employees", label: "QL: Nhân viên"},
   {key: "manager_employee_add", label: "QL: Thêm nhân viên"},
   {key: "manager_employee_detail", label: "QL: Chi tiết + đơn giá"},
+  {key: "manager_employee_assign", label: "QL: Đổi kho"},
+  {key: "manager_employee_assign_open", label: "QL: Đổi kho khi đang trong ca"},
+  {key: "manager_locations", label: "QL: Kho"},
   {key: "manager_lock_open", label: "QL: Khóa đang trong ca"},
   {key: "director_report_day", label: "GĐ: Báo cáo ngày"},
   {key: "director_report_week", label: "GĐ: Báo cáo tuần"},
@@ -284,9 +290,9 @@ export const mockWorkingNow: WorkingNowItem[] = [
 ];
 
 export const mockLocations: WorkLocation[] = [
-  {id: 1, code: "KHO01", name: "Kho A", location_type: "workshop", address: null, latitude: 10, longitude: 106, radius_m: 100, coordinate_source: "manual_coordinates", location_accuracy_m: null, is_active: true},
-  {id: 2, code: "KHO02", name: "Kho B", location_type: "workshop", address: null, latitude: 10.0004, longitude: 106, radius_m: 100, coordinate_source: "device_gps", location_accuracy_m: 24, is_active: true},
-  {id: 3, code: "KHO03", name: "Kho tạm ngừng", location_type: "workshop", address: null, latitude: 10.002, longitude: 106, radius_m: 80, coordinate_source: "device_gps", location_accuracy_m: 126, is_active: false},
+  {id: 1, code: "KHO01", name: "Kho A", location_type: "workshop", address: null, latitude: 10, longitude: 106, radius_m: 100, coordinate_source: "manual_coordinates", location_accuracy_m: null, is_active: true, current_employee_count: 2, current_employees: [{id: 1, code: "NV001", full_name: "Nguyễn Văn A"}, {id: 3, code: "NV003", full_name: "Trần Văn C"}]},
+  {id: 2, code: "KHO02", name: "Kho B", location_type: "workshop", address: null, latitude: 10.0004, longitude: 106, radius_m: 100, coordinate_source: "device_gps", location_accuracy_m: 24, is_active: true, current_employee_count: 2, current_employees: [{id: 2, code: "NV002", full_name: "Lê Thị B"}, {id: 4, code: "NV004", full_name: "Phạm Thị D"}]},
+  {id: 3, code: "KHO03", name: "Kho tạm ngừng", location_type: "workshop", address: null, latitude: 10.002, longitude: 106, radius_m: 80, coordinate_source: "device_gps", location_accuracy_m: 126, is_active: false, current_employee_count: 0, current_employees: []},
 ];
 
 export const mockReviewPending: ReviewItem[] = [
@@ -324,8 +330,13 @@ export const mockPayrollADetail: PayrollDetail = {
 };
 
 export const mockEmployees: ManagedEmployee[] = [
-  {id: 1, code: "NV001", full_name: "Nguyễn Văn A", role: "employee", telegram_id: 1001, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 30000, is_linked: true, has_open_session: true},
-  {id: 2, code: "NV002", full_name: "Lê Thị B", role: "employee", telegram_id: 1002, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 28000, is_linked: true, has_open_session: false},
-  {id: 3, code: "NV003", full_name: "Trần Văn C", role: "employee", telegram_id: null, is_active: false, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 30000, is_linked: false, has_open_session: false},
-  {id: 4, code: "NV004", full_name: "Phạm Thị D", role: "employee", telegram_id: 1004, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 28000, is_linked: true, has_open_session: false},
+  {id: 1, code: "NV001", full_name: "Nguyễn Văn A", role: "employee", telegram_id: 1001, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 30000, is_linked: true, has_open_session: true, current_location: {id: 1, code: "KHO01", name: "Kho A", effective_from: "2026-09-27T08:00:00+07:00"}, work_location: mockLocations[0]},
+  {id: 2, code: "NV002", full_name: "Lê Thị B", role: "employee", telegram_id: 1002, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 28000, is_linked: true, has_open_session: false, current_location: {id: 2, code: "KHO02", name: "Kho B", effective_from: "2026-09-20T08:00:00+07:00"}, work_location: mockLocations[1]},
+  {id: 3, code: "NV003", full_name: "Trần Văn C", role: "employee", telegram_id: null, is_active: false, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 30000, is_linked: false, has_open_session: false, current_location: {id: 1, code: "KHO01", name: "Kho A", effective_from: "2026-09-18T08:00:00+07:00"}, work_location: mockLocations[0]},
+  {id: 4, code: "NV004", full_name: "Phạm Thị D", role: "employee", telegram_id: 1004, is_active: true, tabs: ["attendance", "outputs", "history"], current_hourly_rate: 28000, is_linked: true, has_open_session: false, current_location: {id: 2, code: "KHO02", name: "Kho B", effective_from: "2026-09-24T08:00:00+07:00"}, work_location: mockLocations[1]},
+];
+
+export const mockEmployeeLocationHistory = [
+  {id: 11, employee_id: 1, location_id: 1, location_code: "KHO01", location_name: "Kho A", effective_from: "2026-09-27T08:00:00+07:00", effective_to: null, changed_by: 10, changed_by_name: "Quản lý CRV", reason: "Điều chuyển về xưởng chính"},
+  {id: 10, employee_id: 1, location_id: 2, location_code: "KHO02", location_name: "Kho B", effective_from: "2026-09-20T08:00:00+07:00", effective_to: "2026-09-27T08:00:00+07:00", changed_by: 10, changed_by_name: "Quản lý CRV", reason: "Hỗ trợ kho đóng gói"},
 ];

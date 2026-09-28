@@ -207,8 +207,24 @@ async def current_work_location(session: AsyncSession, employee_id: int) -> Work
     return await session.get(WorkLocationOrm, assignment.location_id)
 
 
+async def current_location_payload(session: AsyncSession, employee_id: int) -> dict | None:
+    assignment = await current_location_assignment(session, employee_id)
+    if not assignment:
+        return None
+    location = await session.get(WorkLocationOrm, assignment.location_id)
+    if not location:
+        return None
+    return {
+        "id": location.id,
+        "code": location.code,
+        "name": location.name,
+        "effective_from": iso_vn(assignment.effective_from),
+    }
+
+
 async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date | None = None) -> dict:
     location = await current_work_location(session, row.id) if row.role == EmployeeRole.employee else None
+    current_location = await current_location_payload(session, row.id) if row.role == EmployeeRole.employee else None
     return {
         "id": row.id,
         "code": row.code,
@@ -220,6 +236,7 @@ async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date
         "is_linked": row.telegram_id is not None,
         "has_open_session": await has_open_session(session, row.id),
         "work_location": location_dict(location) if location else None,
+        "current_location": current_location,
     }
 
 
@@ -1266,7 +1283,23 @@ class WorkLocationService:
             like = f"%{q.strip()}%"
             query = query.where(or_(WorkLocationOrm.code.ilike(like), WorkLocationOrm.name.ilike(like)))
         rows = (await self.session.scalars(query.order_by(WorkLocationOrm.code))).all()
-        return [location_dict(row) for row in rows]
+        result = []
+        for row in rows:
+            data = location_dict(row)
+            employees = (await self.session.execute(
+                select(EmployeeOrm.id, EmployeeOrm.code, EmployeeOrm.full_name)
+                .join(EmployeeLocationAssignmentOrm, EmployeeLocationAssignmentOrm.employee_id == EmployeeOrm.id)
+                .where(
+                    EmployeeLocationAssignmentOrm.location_id == row.id,
+                    EmployeeLocationAssignmentOrm.effective_to.is_(None),
+                    EmployeeOrm.role == EmployeeRole.employee,
+                )
+                .order_by(EmployeeOrm.code)
+            )).all()
+            data["current_employee_count"] = len(employees)
+            data["current_employees"] = [{"id": item.id, "code": item.code, "full_name": item.full_name} for item in employees]
+            result.append(data)
+        return result
 
     async def create(
         self,
@@ -1418,6 +1451,36 @@ class EmployeeService:
         rows = (await self.session.scalars(query.order_by(EmployeeOrm.code))).all()
         return [await employee_admin_dict(self.session, row, _vn(self.clock.now()).date()) for row in rows]
 
+    async def get(self, employee_id: int) -> dict:
+        row = await self.session.get(EmployeeOrm, employee_id)
+        if not row or row.role != EmployeeRole.employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+
+    async def location_history(self, employee_id: int) -> list[dict]:
+        employee = await self.session.get(EmployeeOrm, employee_id)
+        if not employee or employee.role != EmployeeRole.employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        rows = (await self.session.execute(
+            select(EmployeeLocationAssignmentOrm, WorkLocationOrm, EmployeeOrm)
+            .join(WorkLocationOrm, WorkLocationOrm.id == EmployeeLocationAssignmentOrm.location_id)
+            .outerjoin(EmployeeOrm, EmployeeOrm.id == EmployeeLocationAssignmentOrm.changed_by)
+            .where(EmployeeLocationAssignmentOrm.employee_id == employee_id)
+            .order_by(EmployeeLocationAssignmentOrm.effective_from.desc(), EmployeeLocationAssignmentOrm.id.desc())
+        )).all()
+        return [{
+            "id": assignment.id,
+            "employee_id": assignment.employee_id,
+            "location_id": location.id,
+            "location_code": location.code,
+            "location_name": location.name,
+            "effective_from": iso_vn(assignment.effective_from),
+            "effective_to": iso_vn(assignment.effective_to) if assignment.effective_to else None,
+            "changed_by": actor.id if actor else None,
+            "changed_by_name": actor.full_name if actor else None,
+            "reason": assignment.reason,
+        } for assignment, location, actor in rows]
+
     async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int, effective_from: date, location_id: int) -> dict:
         employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, location_id, self.clock)
         data = await employee_admin_dict(self.session, employee, effective_from)
@@ -1502,7 +1565,7 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
     if await session.scalar(select(EmployeeOrm.id).where(EmployeeOrm.code == code)):
         raise fail("EMPLOYEE_CODE_EXISTS", 409)
     if location_id is None:
-        location_id = await session.scalar(select(WorkLocationOrm.id).where(WorkLocationOrm.code == "KHO01"))
+        raise fail("LOCATION_REQUIRED", 422)
     location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update(read=True))
     if not location:
         raise fail("LOCATION_NOT_FOUND", 404)

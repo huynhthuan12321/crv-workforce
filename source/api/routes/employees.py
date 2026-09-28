@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from source.api.dependencies import get_session
 from source.api.workforce_auth import manager_only
 from source.database.models import EmployeeOrm
-from source.schemas.workforce import DataResponse, EmployeeOut
+from source.schemas.workforce import DataResponse, EmployeeLocationAssignmentOut, EmployeeOut
 from source.services.workforce import EmployeeService
 
 router = APIRouter()
@@ -39,6 +39,16 @@ async def employees(
 @router.post("")
 async def add(body: EmployeeBody, actor: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
     return {"data": await EmployeeService(session).create(actor, body.code, body.full_name, body.hourly_rate, body.effective_from, body.location_id)}
+
+
+@router.get("/{employee_id}", response_model=DataResponse[EmployeeOut])
+async def employee_detail(employee_id: int, _: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
+    return {"data": await EmployeeService(session).get(employee_id)}
+
+
+@router.get("/{employee_id}/location-history", response_model=DataResponse[list[EmployeeLocationAssignmentOut]])
+async def location_history(employee_id: int, _: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
+    return {"data": await EmployeeService(session).location_history(employee_id)}
 
 
 @router.post("/{employee_id}/lock", response_model=DataResponse[EmployeeOut])

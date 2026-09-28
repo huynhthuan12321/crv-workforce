@@ -43,7 +43,10 @@ export const managerScenarios = [
   ["manager_employees", "employees", "12_danh_sach_nhan_vien"],
   ["manager_employee_add", "employees", "13_them_nhan_vien"],
   ["manager_employee_detail", "employees", "14_chi_tiet_don_gia"],
-  ["manager_lock_open", "employees", "15_khoa_dang_trong_ca"],
+  ["manager_employee_assign", "employees", "15_doi_kho"],
+  ["manager_employee_assign_open", "employees", "16_doi_kho_dang_trong_ca"],
+  ["manager_locations", "employees", "17_danh_sach_kho"],
+  ["manager_lock_open", "employees", "18_khoa_dang_trong_ca"],
 ];
 
 export const directorScenarios = [
