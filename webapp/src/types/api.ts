@@ -40,6 +40,27 @@ export type WorkSession = {
   check_in_distance_m: number;
   check_out_accuracy_m?: number | null;
   check_out_distance_m: number | null;
+  work_location_id?: number | null;
+  location_code_snapshot?: string | null;
+  location_name_snapshot?: string | null;
+  nearby_location_id?: number | null;
+  nearby_location_distance_m?: number | null;
+};
+
+export type WorkLocation = {
+  id: number;
+  code: string;
+  name: string;
+  location_type: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  coordinate_source: "device_gps" | "manual_coordinates" | string;
+  location_accuracy_m: number | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type Today = {
@@ -49,6 +70,7 @@ export type Today = {
   server_now: string;
   checkin_cutoff: string;
   can_check_in: boolean;
+  work_location?: WorkLocation | null;
 };
 
 export type Consent = {
@@ -215,6 +237,7 @@ export type ManagedEmployee = Employee & {
   current_hourly_rate: number | null;
   is_linked: boolean;
   has_open_session: boolean;
+  work_location?: WorkLocation | null;
   invite_url?: string | null;
 };
 

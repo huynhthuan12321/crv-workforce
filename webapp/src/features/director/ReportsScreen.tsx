@@ -1,12 +1,12 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {api} from "../../api/client";
-import {Button, Card, Metric, ScreenState, SectionTitle, SearchInput} from "../../components/ui";
+import {Button, Card, Chip, Metric, ScreenState, SectionTitle, SearchInput} from "../../components/ui";
 import {fmtMoney} from "../../lib/format";
 import {periodBounds, periodLabel, shiftPeriod, type ReportPeriod} from "../../lib/report-period";
 import {fmtHours, fmtKg} from "../../lib/report-format";
 import {hapticImpact} from "../../lib/haptic";
 import {todayVN} from "../../lib/date-vn";
-import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries} from "../../types/api";
+import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries, WorkLocation} from "../../types/api";
 import {useBackButton} from "../manager/shared";
 
 function reportMockScenario() {
@@ -69,6 +69,8 @@ export function ReportsScreen() {
   const [period, setPeriod] = useState<ReportPeriod>(initialPeriod);
   const [date, setDate] = useState(today);
   const [employee, setEmployee] = useState<ReportEmployee | null>(null);
+  const [location, setLocation] = useState<WorkLocation | null>(null);
+  const [locations, setLocations] = useState<WorkLocation[]>([]);
   const [picker, setPicker] = useState(scenario === mockKey("director", "report", "employees"));
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [series, setSeries] = useState<ReportTimeseries[]>([]);
@@ -78,7 +80,7 @@ export function ReportsScreen() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const query = `period=${period}&date=${date}${employee ? `&employee_id=${employee.id}` : ""}`;
+      const query = `period=${period}&date=${date}${employee ? `&employee_id=${employee.id}` : ""}${location ? `&location_id=${location.id}` : ""}`;
       const [nextSummary, nextSeries, nextProducts] = await Promise.all([
         api.get<ReportSummary>(`/reports/summary?${query}`),
         api.get<ReportTimeseries[]>(`/reports/timeseries?${query}`),
@@ -87,8 +89,9 @@ export function ReportsScreen() {
       setSummary(nextSummary); setSeries(nextSeries); setProducts(nextProducts);
     } catch (err) { setError(err instanceof Error ? err.message : "Không tải được báo cáo"); }
     finally { setLoading(false); }
-  }, [date, employee, period]);
+  }, [date, employee, location, period]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void api.get<WorkLocation[]>("/locations?active=true").then(setLocations).catch(() => setLocations([])); }, []);
   useEffect(() => {
     if (scenario !== mockKey("director", "report", "filtered")) return;
     void api.get<ReportEmployee[]>("/reports/employees").then((rows) => setEmployee(rows[0] ?? null));
@@ -106,6 +109,15 @@ export function ReportsScreen() {
     <div className="segmented">{(["day", "week", "month"] as const).map((key) => <button key={key} className={period === key ? "active" : ""} onClick={() => { hapticImpact(); setPeriod(key); }}>{key === "day" ? "Ngày" : key === "week" ? "Tuần" : "Tháng"}</button>)}</div>
     <div className="report-period-nav"><button onClick={() => setDate(shiftPeriod(period, date, -1))}>‹</button><b>{periodLabel(period, date)}</b><button disabled={!canNext} onClick={() => setDate(shiftPeriod(period, date, 1))}>›</button></div>
     <button className="filter-chip" onClick={() => setPicker(true)}>{employee ? `${employee.code} · ${employee.full_name} ✕` : "Tất cả nhân viên"}</button>
+    <Card>
+      <label className="form-field">Bộ lọc kho
+        <select value={location?.id ?? ""} onChange={(event) => setLocation(locations.find((item) => String(item.id) === event.target.value) ?? null)}>
+          <option value="">Tất cả kho</option>
+          {locations.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
+        </select>
+      </label>
+      {location && <Chip tone="info">{location.code} · {location.name}</Chip>}
+    </Card>
     <div className="mini-grid"><Metric label="Giờ công" value={fmtHours(summary.minutes)} /><Metric label="Tổng túi" value={summary.bags.toLocaleString("vi-VN")} /><Metric label="Tổng kg" value={fmtKg(summary.kg)} /></div>
     <Card>
       <SectionTitle title="Lương" />

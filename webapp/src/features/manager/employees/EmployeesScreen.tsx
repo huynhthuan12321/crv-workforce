@@ -4,7 +4,7 @@ import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../co
 import {fmtDate, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
 import {hapticNotify} from "../../../lib/haptic";
-import type {ManagedEmployee, RateHistory} from "../../../types/api";
+import type {ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
 import {errorText, useBackButton} from "../shared";
 
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
@@ -23,6 +23,7 @@ export function EmployeesScreen() {
   const [rows, setRows] = useState<ManagedEmployee[]>([]);
   const [q, setQ] = useState("");
   const [active, setActive] = useState<"all" | "active" | "locked">("all");
+  const [subtab, setSubtab] = useState<"employees" | "locations">("employees");
   const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
   const [selected, setSelected] = useState<ManagedEmployee | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function EmployeesScreen() {
 
   if (screen === "add") return <EmployeeAddScreen onBack={() => setScreen("list")} onCreated={(url) => setInvite(url)} invite={invite} />;
   if (screen === "detail") return <EmployeeDetailScreen employee={selected || rows[0]} onBack={() => setScreen("list")} onChanged={load} />;
+  if (subtab === "locations") return <LocationsScreen onBack={() => setSubtab("employees")} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải nhân viên" />;
   if (error) return <ScreenState kind="error" title="Không tải được nhân viên" message={error} onRetry={load} />;
 
@@ -69,6 +71,10 @@ export function EmployeesScreen() {
   return (
     <div className="screen-stack">
       <SectionTitle eyebrow="Nhân viên" title="Danh sách nhân viên" action={<Button className="small-button" onClick={() => setScreen("add")}>Thêm</Button>} />
+      <div className="segmented">
+        <button className={(subtab as string) === "employees" ? "active" : ""} onClick={() => setSubtab("employees")}>Nhân viên</button>
+        <button className={(subtab as string) === "locations" ? "active" : ""} onClick={() => setSubtab("locations")}>Kho</button>
+      </div>
       <Card>
         <label className="form-field">Tìm kiếm<input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Tên hoặc mã nhân viên" /></label>
         <div className="segmented">
@@ -83,6 +89,7 @@ export function EmployeesScreen() {
             <button className="plain-button" onClick={() => { setSelected(row); setScreen("detail"); }}>
               <b>{row.full_name}</b>
               <small>{row.code} · {fmtMoney(row.current_hourly_rate ?? 0)}/giờ</small>
+              {row.work_location && <small>Kho: {row.work_location.code} · {row.work_location.name}</small>}
             </button>
             <button type="button" className={`switch ${row.is_active ? "on" : ""}`} aria-label={row.is_active ? "Khóa" : "Mở khóa"} onClick={() => void toggleLock(row)} />
           </div>
@@ -95,6 +102,95 @@ export function EmployeesScreen() {
       ))}
     </div>
   );
+}
+
+function LocationsScreen({onBack}: {onBack: () => void}) {
+  const [rows, setRows] = useState<WorkLocation[]>([]);
+  const [form, setForm] = useState({code: "", name: "", latitude: "", longitude: "", radius_m: 100});
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await api.get<WorkLocation[]>("/locations"));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => void load(), [load]);
+
+  const create = async (source: "gps" | "manual") => {
+    setBusy(true);
+    setError(null);
+    try {
+      let latitude = Number(form.latitude);
+      let longitude = Number(form.longitude);
+      let accuracy: number | null = null;
+      if (source === "gps") {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {maximumAge: 0, timeout: 10000}));
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+        accuracy = position.coords.accuracy;
+      }
+      await api.post<WorkLocation>("/locations", {
+        code: form.code,
+        name: form.name,
+        latitude,
+        longitude,
+        radius_m: form.radius_m,
+        coordinate_source: source === "gps" ? "device_gps" : "manual_coordinates",
+        location_accuracy_m: accuracy,
+        low_accuracy_confirmed: accuracy === null || accuracy <= 100,
+      });
+      setForm({code: "", name: "", latitude: "", longitude: "", radius_m: 100});
+      hapticNotify("success");
+      await load();
+    } catch (err) {
+      hapticNotify("error");
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async (row: WorkLocation) => {
+    try {
+      await api.post<WorkLocation>(`/locations/${row.id}/${row.is_active ? "deactivate" : "activate"}`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  return <div className="screen-stack">
+    <Button tone="ghost" className="back-button" onClick={onBack}>← Quay lại</Button>
+    <SectionTitle eyebrow="Kho" title="Quản lý điểm làm việc" />
+    <Card>
+      <label className="form-field">Mã kho<input value={form.code} onChange={(event) => setForm({...form, code: event.target.value})} placeholder="KHO02" /></label>
+      <label className="form-field">Tên kho<input value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} placeholder="Kho đóng gói" /></label>
+      <div className="two-col">
+        <label className="form-field">Vĩ độ<input value={form.latitude} onChange={(event) => setForm({...form, latitude: event.target.value})} /></label>
+        <label className="form-field">Kinh độ<input value={form.longitude} onChange={(event) => setForm({...form, longitude: event.target.value})} /></label>
+      </div>
+      <label className="form-field">Bán kính (m)<input type="number" value={form.radius_m} onChange={(event) => setForm({...form, radius_m: Number(event.target.value)})} /></label>
+      {error && <p className="form-error">{error}</p>}
+      <div className="action-row">
+        <Button busy={busy} onClick={() => void create("gps")}>Tạo bằng GPS</Button>
+        <Button tone="secondary" busy={busy} onClick={() => void create("manual")}>Tạo thủ công</Button>
+      </div>
+    </Card>
+    {rows.map((row) => <Card key={row.id} className="manager-card">
+      <div className="manager-row">
+        <div>
+          <b>{row.code} · {row.name}</b>
+          <small>{row.latitude.toFixed(6)}, {row.longitude.toFixed(6)} · bán kính {row.radius_m} m</small>
+        </div>
+        <Chip tone={row.is_active ? "success" : "danger"}>{row.is_active ? "Đang dùng" : "Ngừng dùng"}</Chip>
+      </div>
+      <Button tone="secondary" onClick={() => void toggle(row)}>{row.is_active ? "Ngừng dùng" : "Dùng lại"}</Button>
+    </Card>)}
+  </div>;
 }
 
 function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onCreated: (url: string) => void; invite: string | null}) {
