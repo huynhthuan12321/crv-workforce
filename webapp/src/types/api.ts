@@ -148,7 +148,7 @@ export type History = {
 export type LocationPayload = {
   lat: number;
   lng: number;
-  accuracy_m: number;
+  accuracy_m: number | null;
 };
 
 export type AuthData = {

@@ -564,3 +564,107 @@ async def test_gd7c_employee_admin_errors_audit_and_rate_conflict(api_client, pg
             ),
         )).scalar_one()
         assert actions == 3
+
+
+async def test_validation_error_payload_for_missing_location_code(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QLVAL", EmployeeRole.manager, 8101)
+            manager_id = manager.id
+
+    response = api_client.post(
+        "/api/locations",
+        json={
+            "name": "Kho thiếu mã",
+            "latitude": 10.0,
+            "longitude": 106.0,
+            "radius_m": 100,
+            "coordinate_source": "manual_coordinates",
+        },
+        headers=auth_headers(manager_id),
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["code"] == "VALIDATION_ERROR"
+    assert "code" in payload["details"]["fields"]
+    assert "Mã kho" in payload["message"]
+
+
+async def test_duplicate_location_code_and_name_return_409_not_500(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QLDUP", EmployeeRole.manager, 8201)
+            manager_id = manager.id
+
+    headers = auth_headers(manager_id)
+    base = {
+        "code": "KHO02",
+        "name": "Kho 02",
+        "latitude": 10.0,
+        "longitude": 106.0,
+        "radius_m": 100,
+        "coordinate_source": "manual_coordinates",
+    }
+    response = api_client.post("/api/locations", json=base, headers=headers)
+    assert response.status_code == 200, response.text
+    location_id = response.json()["data"]["id"]
+
+    duplicate_code = api_client.post("/api/locations", json={**base, "name": "Kho khác"}, headers=headers)
+    assert duplicate_code.status_code == 409, duplicate_code.text
+    assert duplicate_code.json()["code"] == "LOCATION_CODE_EXISTS"
+
+    duplicate_name = api_client.post("/api/locations", json={**base, "code": "KHO03"}, headers=headers)
+    assert duplicate_name.status_code == 409, duplicate_name.text
+    assert duplicate_name.json()["code"] == "LOCATION_NAME_EXISTS"
+
+    update_duplicate = api_client.patch(f"/api/locations/{location_id}", json={"code": "KHO01"}, headers=headers)
+    assert update_duplicate.status_code == 409, update_duplicate.text
+    assert update_duplicate.json()["code"] == "LOCATION_CODE_EXISTS"
+
+
+async def test_duplicate_employee_and_rate_return_409_not_500(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QLDUP2", EmployeeRole.manager, 8301)
+            employee = await seed_actor(session, "NVDUP", EmployeeRole.employee, 8302)
+            await seed_rate(session, employee.id)
+            manager_id, employee_id = manager.id, employee.id
+
+    headers = auth_headers(manager_id)
+    duplicate_employee = api_client.post(
+        "/api/employees",
+        json={"code": "NVDUP", "full_name": "Trùng mã", "hourly_rate": 30000, "effective_from": str(date.today())},
+        headers=headers,
+    )
+    assert duplicate_employee.status_code == 409, duplicate_employee.text
+    assert duplicate_employee.json()["code"] == "EMPLOYEE_CODE_EXISTS"
+
+    duplicate_rate = api_client.post(
+        f"/api/employees/{employee_id}/rates",
+        json={"hourly_rate": 31000, "effective_from": str(NOW.date())},
+        headers=headers,
+    )
+    assert duplicate_rate.status_code == 409, duplicate_rate.text
+    assert duplicate_rate.json()["code"] == "RATE_DATE_EXISTS"
+
+
+async def test_post_patch_bad_or_duplicate_inputs_do_not_return_500(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QLNO500", EmployeeRole.manager, 8401)
+            employee = await seed_actor(session, "NVNO500", EmployeeRole.employee, 8402)
+            await seed_rate(session, employee.id)
+            manager_id, employee_id = manager.id, employee.id
+
+    headers = auth_headers(manager_id)
+    cases = [
+        ("POST", "/api/locations", {"name": "Thiếu mã"}),
+        ("POST", "/api/employees", {"code": "NVNO500", "full_name": "Trùng", "hourly_rate": 30000, "effective_from": str(date.today())}),
+        ("POST", f"/api/employees/{employee_id}/rates", {"hourly_rate": 31000, "effective_from": str(NOW.date())}),
+        ("POST", f"/api/review/999999/close", {"check_out_time": "2026-04-24T09:00:00+07:00", "reason": "không tồn tại"}),
+        ("PATCH", f"/api/review/999999", {"check_in_time": "2026-04-24T08:00:00+07:00", "check_out_time": "2026-04-24T09:00:00+07:00", "reason": "không tồn tại"}),
+    ]
+    for method, path, body in cases:
+        response = api_client.request(method, path, json=body, headers=headers)
+        assert response.status_code < 500, (method, path, response.status_code, response.text)

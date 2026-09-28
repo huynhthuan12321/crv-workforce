@@ -38,6 +38,7 @@ MESSAGES = {
     "EMPLOYEE_NOT_FOUND": "Không tìm thấy nhân viên.",
     "EMPLOYEE_HAS_OPEN_SESSION": "Nhân viên đang trong ca, không thể khóa.",
     "INVALID_EMPLOYEE_DATA": "Dữ liệu nhân viên không hợp lệ.",
+    "EMPLOYEE_CODE_EXISTS": "Mã nhân viên đã tồn tại.",
     "RATE_DATE_IN_PAST": "Ngày hiệu lực không được trước hôm nay.",
     "RATE_DATE_EXISTS": "Ngày hiệu lực này đã có đơn giá.",
     "LOCATION_REQUIRED": "Nhân viên chưa được phân công kho.",
@@ -45,6 +46,8 @@ MESSAGES = {
     "LOCATION_INACTIVE": "Kho đã ngừng dùng. Liên hệ quản lý.",
     "LOCATION_IN_USE": "Kho đang được sử dụng.",
     "LOCATION_INVALID": "Dữ liệu kho không hợp lệ.",
+    "LOCATION_CODE_EXISTS": "Mã kho đã tồn tại.",
+    "LOCATION_NAME_EXISTS": "Tên kho đã tồn tại.",
 }
 
 

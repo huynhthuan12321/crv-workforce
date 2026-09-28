@@ -132,7 +132,7 @@ class WorkSessionOrm(Base, TimestampMixin):
     check_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     check_in_lat: Mapped[Decimal] = mapped_column(Numeric(10, 7))
     check_in_lng: Mapped[Decimal] = mapped_column(Numeric(10, 7))
-    check_in_accuracy_m: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    check_in_accuracy_m: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     check_in_distance_m: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     check_out_lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     check_out_lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))

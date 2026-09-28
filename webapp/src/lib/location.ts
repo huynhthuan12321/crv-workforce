@@ -7,13 +7,19 @@ type TelegramLocation = {
   longitude?: number;
   accuracy?: number;
   accuracy_m?: number;
+  horizontal_accuracy?: number | null;
 };
+
+function normalizeAccuracy(value: unknown): number | null {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
+}
 
 function fromTelegramLocation(data: TelegramLocation): LocationPayload {
   return {
     lat: Number(data.latitude),
     lng: Number(data.longitude),
-    accuracy_m: Number(data.accuracy ?? data.accuracy_m ?? 0),
+    accuracy_m: normalizeAccuracy(data.horizontal_accuracy ?? data.accuracy ?? data.accuracy_m),
   };
 }
 
@@ -49,7 +55,7 @@ async function getFromNavigator(): Promise<LocationPayload> {
       (position) => resolve({
         lat: position.coords.latitude,
         lng: position.coords.longitude,
-        accuracy_m: position.coords.accuracy,
+        accuracy_m: normalizeAccuracy(position.coords.accuracy),
       }),
       () => reject(new Error("LOCATION_DENIED")),
       {enableHighAccuracy: true, timeout: 15000, maximumAge: 0},

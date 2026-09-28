@@ -96,6 +96,7 @@ interface LocationManager {
     longitude?: number;
     accuracy?: number;
     accuracy_m?: number;
+    horizontal_accuracy?: number | null;
   } | null) => void): void;
   openSettings?(): void;
 }

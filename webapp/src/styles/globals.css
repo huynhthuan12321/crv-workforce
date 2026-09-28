@@ -933,6 +933,16 @@ input:disabled {
   padding: 12px;
 }
 
+.form-field input.input-error,
+.form-field textarea.input-error {
+  border-color: var(--crv-danger);
+}
+
+.field-error {
+  color: var(--crv-danger);
+  font-size: 12px;
+}
+
 .form-field textarea {
   min-height: 96px;
   resize: vertical;
