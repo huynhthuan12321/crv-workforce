@@ -31,6 +31,7 @@ from source.services.workforce import (
     OutputService,
     PayrollService,
     ReviewService,
+    WorkLocationService,
     session_dict,
 )
 from source.utils.clock import FakeClock, VIETNAM_TZ
@@ -201,6 +202,37 @@ async def test_attendance_gps_flags_previous_review_does_not_block(session):
     assert set(row.flags) == {"gps_out_of_range", "gps_low_accuracy"}
 
     assert row.status == SessionStatus.open
+
+
+@pytest.mark.unit
+async def test_attendance_unknown_gps_accuracy_is_flagged_for_review(session):
+    employee = await make_employee(session)
+    await add_consent(session, employee, dt(6, 0))
+
+    row = await AttendanceService(session, FakeClock(dt(8, 0))).check_in(employee, 10.0, 106.0, None)
+
+    assert row.check_in_accuracy_m is None
+    assert row.flags == ["gps_accuracy_unknown"]
+    assert row.flag_source == "check_in"
+
+
+@pytest.mark.unit
+async def test_location_gps_unknown_accuracy_requires_confirmation_and_audits(session):
+    manager = await make_employee(session, "QL001", "Quản lý", role=EmployeeRole.manager)
+    service = WorkLocationService(session, FakeClock(dt(8, 0)))
+
+    with pytest.raises(WorkforceError) as exc:
+        await service.create(manager, "KHO02", "Kho 02", None, 10.0, 106.0, 100, "device_gps", None, False)
+    assert_code(exc, "LOCATION_INVALID")
+    assert exc.value.details["reason"] == "low_accuracy_requires_confirmation"
+
+    created = await service.create(manager, "KHO02", "Kho 02", None, 10.0, 106.0, 100, "device_gps", None, True)
+    audit = await session.scalar(select(AuditLogOrm).where(AuditLogOrm.action == "location_saved_with_low_accuracy"))
+
+    assert created["code"] == "KHO02"
+    assert created["location_accuracy_m"] is None
+    assert audit is not None
+    assert audit.new_value["accuracy_m"] is None
 
 
 @pytest.mark.unit

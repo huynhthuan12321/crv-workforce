@@ -19,6 +19,10 @@ function round(value: number | null | undefined): number {
 }
 
 export function gpsLabel(row: GpsLabelInput): string {
+  if (row.flags.includes("gps_accuracy_unknown")) {
+    return "Không xác định được độ chính xác vị trí";
+  }
+
   if (row.flags.includes("gps_low_accuracy")) {
     const accuracy = row.flag_source === "check_out"
       ? row.check_out_accuracy_m

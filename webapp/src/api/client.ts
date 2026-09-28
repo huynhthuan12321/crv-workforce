@@ -3,6 +3,8 @@ import {ApiError} from "./errors";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
+const NETWORK_MESSAGE = "Không thể kết nối máy chủ. Vui lòng thử lại.";
+const VALIDATION_MESSAGE = "Dữ liệu chưa hợp lệ, vui lòng kiểm tra lại.";
 
 export {ApiError};
 
@@ -44,6 +46,19 @@ class ApiClient {
     }
   }
 
+  private errorFromResponse(response: Response, json: any) {
+    if (response.status >= 500) {
+      return new ApiError(json?.code || "API_ERROR", json?.message || NETWORK_MESSAGE, response.status, json?.details);
+    }
+    if (json?.code || json?.message) {
+      return new ApiError(json?.code || "API_ERROR", json?.message || VALIDATION_MESSAGE, response.status, json?.details);
+    }
+    if (response.status === 422 && Array.isArray(json?.detail)) {
+      return new ApiError("VALIDATION_ERROR", VALIDATION_MESSAGE, response.status, json);
+    }
+    return new ApiError("API_ERROR", VALIDATION_MESSAGE, response.status, json?.details);
+  }
+
   private async publicPost<T>(path: string, body: unknown): Promise<T> {
     let response: Response;
     try {
@@ -53,12 +68,10 @@ class ApiClient {
         body: JSON.stringify(body),
       });
     } catch {
-      throw new ApiError("NETWORK_ERROR", "Không thể kết nối máy chủ. Vui lòng thử lại.");
+      throw new ApiError("NETWORK_ERROR", NETWORK_MESSAGE);
     }
     const json = await this.parseJson(response);
-    if (!response.ok) {
-      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status, json?.details);
-    }
+    if (!response.ok) throw this.errorFromResponse(response, json);
     this.token = json.data.token;
     sessionStorage.setItem("crv_token", this.token);
     return json.data as T;
@@ -73,7 +86,7 @@ class ApiClient {
         headers: {"Content-Type": "application/json", Authorization: `Bearer ${this.token}`, ...options.headers},
       });
     } catch {
-      throw new ApiError("NETWORK_ERROR", "Không thể kết nối máy chủ. Vui lòng thử lại.");
+      throw new ApiError("NETWORK_ERROR", NETWORK_MESSAGE);
     }
     const json = await this.parseJson(response);
     if (!response.ok) {
@@ -81,7 +94,7 @@ class ApiClient {
         await this.login();
         return this.request(path, options, false);
       }
-      throw new ApiError(json?.code || "API_ERROR", json?.message || "Không thể kết nối máy chủ. Vui lòng thử lại.", response.status, json?.details);
+      throw this.errorFromResponse(response, json);
     }
     return json.data as T;
   }

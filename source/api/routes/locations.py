@@ -32,6 +32,7 @@ class LocationPatchBody(BaseModel):
     radius_m: int | None = Field(default=None, ge=30, le=1000)
     coordinate_source: str | None = Field(default=None, pattern="^(device_gps|manual_coordinates)$")
     location_accuracy_m: float | None = Field(default=None, ge=0, le=10000)
+    low_accuracy_confirmed: bool = False
 
 
 class AssignBody(BaseModel):

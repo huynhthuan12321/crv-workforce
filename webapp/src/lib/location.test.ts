@@ -26,10 +26,21 @@ describe("location", () => {
       isInited: true,
       isLocationAvailable: true,
       isAccessGranted: true,
-      getLocation: (callback: (location: unknown) => void) => callback({latitude: 10.1, longitude: 106.2, accuracy: 12}),
+      getLocation: (callback: (location: unknown) => void) => callback({latitude: 10.1, longitude: 106.2, horizontal_accuracy: 18}),
     });
 
-    await expect(getCurrentLocation()).resolves.toEqual({lat: 10.1, lng: 106.2, accuracy_m: 12});
+    await expect(getCurrentLocation()).resolves.toEqual({lat: 10.1, lng: 106.2, accuracy_m: 18});
+  });
+
+  it("returns null accuracy when Telegram omits horizontal_accuracy", async () => {
+    setTelegramManager({
+      isInited: true,
+      isLocationAvailable: true,
+      isAccessGranted: true,
+      getLocation: (callback: (location: unknown) => void) => callback({latitude: 10.1, longitude: 106.2}),
+    });
+
+    await expect(getCurrentLocation()).resolves.toEqual({lat: 10.1, lng: 106.2, accuracy_m: null});
   });
 
   it("falls back when Telegram LocationManager is denied", async () => {

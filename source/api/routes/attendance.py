@@ -15,7 +15,7 @@ router = APIRouter()
 class LocationBody(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
-    accuracy_m: float = Field(ge=0, le=10000)
+    accuracy_m: float | None = Field(default=None, ge=0, le=10000)
 
 
 @router.get("/today", response_model=DataResponse[TodayOut])

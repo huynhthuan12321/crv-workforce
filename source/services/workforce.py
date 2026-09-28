@@ -35,12 +35,14 @@ def ceil_money(value: Decimal, unit: int | None = None) -> int:
     return int((value / Decimal(unit)).to_integral_value(rounding=ROUND_CEILING) * unit)
 
 
-def _flags(distance: float, accuracy: float, radius_m: int | Decimal | None) -> list[str]:
+def _flags(distance: float, accuracy: float | None, radius_m: int | Decimal | None) -> list[str]:
     result = []
     radius = Decimal(str(radius_m or 0))
     if Decimal(str(distance)) > radius:
         result.append("gps_out_of_range")
-    if accuracy > settings.rules.gps_max_accuracy_m:
+    if accuracy is None:
+        result.append("gps_accuracy_unknown")
+    elif accuracy > settings.rules.gps_max_accuracy_m:
         result.append("gps_low_accuracy")
     return result
 
@@ -99,6 +101,9 @@ def _flag_source(row: WorkSessionOrm) -> str | None:
             row.check_out_accuracy_m is not None
             and Decimal(row.check_out_accuracy_m) > Decimal(str(settings.rules.gps_max_accuracy_m))
         )
+    if "gps_accuracy_unknown" in (row.flags or []):
+        in_flagged = in_flagged or row.check_in_accuracy_m is None
+        out_flagged = out_flagged or (row.check_out_at is not None and row.check_out_accuracy_m is None)
     if in_flagged and out_flagged:
         return "both"
     if out_flagged:
@@ -367,7 +372,7 @@ class AttendanceService:
             raise fail("LOCATION_INACTIVE")
         return location
 
-    async def check_in(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float) -> WorkSessionOrm:
+    async def check_in(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float | None) -> WorkSessionOrm:
         now = _vn(self.clock.now())
         _, consented = await current_consent(self.session, employee.id, now)
         if not consented:
@@ -384,7 +389,8 @@ class AttendanceService:
         row = WorkSessionOrm(
             employee_id=employee.id, work_date=now.date(), check_in_at=now,
             check_in_lat=Decimal(str(lat)), check_in_lng=Decimal(str(lng)),
-            check_in_accuracy_m=Decimal(str(accuracy_m)), check_in_distance_m=Decimal(str(distance)),
+            check_in_accuracy_m=Decimal(str(accuracy_m)) if accuracy_m is not None else None,
+            check_in_distance_m=Decimal(str(distance)),
             work_location_id=location.id,
             location_code_snapshot=location.code,
             location_name_snapshot=location.name,
@@ -404,7 +410,7 @@ class AttendanceService:
             raise fail("SESSION_ALREADY_OPEN") from exc
         return row
 
-    async def check_out(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float) -> WorkSessionOrm:
+    async def check_out(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float | None) -> WorkSessionOrm:
         now = _vn(self.clock.now())
         row = await self.session.scalar(select(WorkSessionOrm).where(
             WorkSessionOrm.employee_id == employee.id,
@@ -415,7 +421,8 @@ class AttendanceService:
         distance = haversine_m(lat, lng, float(row.location_lat_snapshot), float(row.location_lng_snapshot))
         row.check_out_at = now
         row.check_out_lat, row.check_out_lng = Decimal(str(lat)), Decimal(str(lng))
-        row.check_out_accuracy_m, row.check_out_distance_m = Decimal(str(accuracy_m)), Decimal(str(distance))
+        row.check_out_accuracy_m = Decimal(str(accuracy_m)) if accuracy_m is not None else None
+        row.check_out_distance_m = Decimal(str(distance))
         row.flags = list(dict.fromkeys([*(row.flags or []), *_flags(distance, accuracy_m, row.location_radius_m_snapshot)]))
         row.flag_source = _flag_source(row)
         row.minutes = max(0, int((now - _vn(row.check_in_at)).total_seconds() // 60))
@@ -1222,6 +1229,35 @@ class WorkLocationService:
         if coordinate_source not in {"device_gps", "manual_coordinates"}:
             raise fail("LOCATION_INVALID", 422)
 
+    async def _ensure_unique_location(self, code: str, name: str, exclude_id: int | None = None) -> None:
+        code_query = select(WorkLocationOrm.id).where(WorkLocationOrm.code == code)
+        name_query = select(WorkLocationOrm.id).where(WorkLocationOrm.name == name)
+        if exclude_id is not None:
+            code_query = code_query.where(WorkLocationOrm.id != exclude_id)
+            name_query = name_query.where(WorkLocationOrm.id != exclude_id)
+        if await self.session.scalar(code_query):
+            raise fail("LOCATION_CODE_EXISTS", 409)
+        if await self.session.scalar(name_query):
+            raise fail("LOCATION_NAME_EXISTS", 409)
+
+    def _requires_low_accuracy_confirmation(self, coordinate_source: str, location_accuracy_m: float | None) -> bool:
+        return coordinate_source == "device_gps" and (
+            location_accuracy_m is None or location_accuracy_m > settings.rules.gps_max_accuracy_m
+        )
+
+    def _add_low_accuracy_location_audit(self, actor: EmployeeOrm, row: WorkLocationOrm, accuracy_m: float | None) -> None:
+        self.session.add(AuditLogOrm(
+            actor_id=actor.id,
+            action="location_saved_with_low_accuracy",
+            entity_type="work_location",
+            entity_id=row.id,
+            new_value={
+                "accuracy_m": accuracy_m,
+                "confirmed_by": actor.id,
+                "confirmed_at": iso_vn(self.clock.now()),
+            },
+        ))
+
     async def list_locations(self, active: bool | None = None, q: str | None = None) -> list[dict]:
         query = select(WorkLocationOrm)
         if active is not None:
@@ -1245,11 +1281,14 @@ class WorkLocationService:
         location_accuracy_m: float | None,
         low_accuracy_confirmed: bool = False,
     ) -> dict:
+        code = code.strip().upper()
+        name = name.strip()
         self._validate_location(latitude, longitude, radius_m, coordinate_source)
         if coordinate_source == "manual_coordinates":
             location_accuracy_m = None
-        if coordinate_source == "device_gps" and location_accuracy_m is not None and location_accuracy_m > 100 and not low_accuracy_confirmed:
+        if self._requires_low_accuracy_confirmation(coordinate_source, location_accuracy_m) and not low_accuracy_confirmed:
             raise fail("LOCATION_INVALID", 422, details={"reason": "low_accuracy_requires_confirmation"})
+        await self._ensure_unique_location(code, name)
         row = WorkLocationOrm(
             code=code,
             name=name,
@@ -1263,12 +1302,12 @@ class WorkLocationService:
             created_by=actor.id,
         )
         self.session.add(row)
-        await self.session.flush()
-        if coordinate_source == "device_gps" and location_accuracy_m is not None and location_accuracy_m > 100:
-            self.session.add(AuditLogOrm(actor_id=actor.id, action="location_saved_with_low_accuracy",
-                                         entity_type="work_location", entity_id=row.id,
-                                         new_value={"accuracy_m": location_accuracy_m, "confirmed_by": actor.id,
-                                                    "confirmed_at": iso_vn(self.clock.now())}))
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise fail("LOCATION_INVALID") from exc
+        if self._requires_low_accuracy_confirmation(coordinate_source, location_accuracy_m):
+            self._add_low_accuracy_location_audit(actor, row, location_accuracy_m)
         return location_dict(row)
 
     async def update(self, actor: EmployeeOrm, location_id: int, **values) -> dict:
@@ -1279,11 +1318,24 @@ class WorkLocationService:
         longitude = float(values.get("longitude", row.longitude))
         radius_m = int(values.get("radius_m", row.radius_m))
         coordinate_source = values.get("coordinate_source", row.coordinate_source)
+        low_accuracy_confirmed = bool(values.pop("low_accuracy_confirmed", False))
         self._validate_location(latitude, longitude, radius_m, coordinate_source)
         old = location_dict(row)
+        next_code = values.get("code", row.code)
+        next_name = values.get("name", row.name)
+        if next_code is not None:
+            next_code = str(next_code).strip().upper()
+        if next_name is not None:
+            next_name = str(next_name).strip()
+        await self._ensure_unique_location(str(next_code), str(next_name), exclude_id=row.id)
         for field in ["code", "name", "address"]:
             if field in values and values[field] is not None:
-                setattr(row, field, values[field])
+                value = values[field]
+                if field == "code":
+                    value = str(value).strip().upper()
+                if field == "name":
+                    value = str(value).strip()
+                setattr(row, field, value)
         row.latitude = Decimal(str(latitude))
         row.longitude = Decimal(str(longitude))
         row.radius_m = radius_m
@@ -1291,9 +1343,18 @@ class WorkLocationService:
         if coordinate_source == "manual_coordinates":
             row.location_accuracy_m = None
         elif "location_accuracy_m" in values:
+            if self._requires_low_accuracy_confirmation(coordinate_source, values["location_accuracy_m"]) and not low_accuracy_confirmed:
+                raise fail("LOCATION_INVALID", 422, details={"reason": "low_accuracy_requires_confirmation"})
             row.location_accuracy_m = Decimal(str(values["location_accuracy_m"])) if values["location_accuracy_m"] is not None else None
         self.session.add(AuditLogOrm(actor_id=actor.id, action="location_updated", entity_type="work_location",
                                      entity_id=row.id, old_value=old, new_value=location_dict(row)))
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise fail("LOCATION_INVALID") from exc
+        await self.session.refresh(row)
+        if coordinate_source == "device_gps" and "location_accuracy_m" in values and self._requires_low_accuracy_confirmation(coordinate_source, values["location_accuracy_m"]):
+            self._add_low_accuracy_location_audit(actor, row, values["location_accuracy_m"])
         return location_dict(row)
 
     async def set_active(self, actor: EmployeeOrm, location_id: int, active: bool) -> dict:
@@ -1422,7 +1483,10 @@ class EmployeeService:
         self.session.add(AuditLogOrm(actor_id=actor.id, action="rate_added",
                                      entity_type="employee", entity_id=employee_id,
                                      new_value={"hourly_rate": hourly_rate, "effective_from": str(effective_from)}))
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise fail("RATE_DATE_EXISTS", 409) from exc
         return {"id": row.id, "hourly_rate": row.hourly_rate, "effective_from": row.effective_from}
 
 
@@ -1431,8 +1495,12 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
                           clock: Clock | None = None) -> tuple[EmployeeOrm, str]:
     clock = clock or Clock()
     today = _vn(clock.now()).date()
+    code = code.strip().upper()
+    name = name.strip()
     if effective_from < today or hourly_rate <= 0:
         raise fail("INVALID_EMPLOYEE_DATA", 422)
+    if await session.scalar(select(EmployeeOrm.id).where(EmployeeOrm.code == code)):
+        raise fail("EMPLOYEE_CODE_EXISTS", 409)
     if location_id is None:
         location_id = await session.scalar(select(WorkLocationOrm.id).where(WorkLocationOrm.code == "KHO01"))
     location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update(read=True))
@@ -1442,7 +1510,10 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
         raise fail("LOCATION_INACTIVE")
     employee = EmployeeOrm(code=code, full_name=name, role=EmployeeRole.employee)
     session.add(employee)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise fail("EMPLOYEE_CODE_EXISTS", 409) from exc
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=hourly_rate,
                                effective_from=effective_from, created_by=actor.id))
     session.add(EmployeeLocationAssignmentOrm(employee_id=employee.id, location_id=location.id,
