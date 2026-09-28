@@ -443,6 +443,51 @@ async def test_history_grouped_by_day_shows_batch_money_and_output(api_client, p
     assert day["batches"][0]["sessions"][0]["output"][0]["bags"] == 5
 
 
+async def test_nearby_location_name_returned_in_today_and_history(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            session.add(ConsentTextOrm(version=1, content="consent", effective_at=NOW - timedelta(days=1)))
+            employee = await seed_actor(session, "NVNEAR", EmployeeRole.employee, 6101)
+            await seed_rate(session, employee.id)
+            assigned = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.code == "KHO01"))
+            assigned.code = "KHOB"
+            assigned.name = "Kho B"
+            assigned.latitude = Decimal("10.010")
+            assigned.longitude = Decimal("106.010")
+            nearby = WorkLocationOrm(
+                code="KHOA",
+                name="Kho A",
+                latitude=Decimal("10.000"),
+                longitude=Decimal("106.000"),
+                radius_m=120,
+                coordinate_source="manual_coordinates",
+                is_active=True,
+            )
+            session.add(nearby)
+            await seed_consent(session, employee.id)
+            employee_id = employee.id
+
+    headers = auth_headers(employee_id)
+    await clear_rate_limit_state()
+    response = api_client.post("/api/attendance/check-in", json={"lat": 10.0, "lng": 106.0, "accuracy_m": 10}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["nearby_location_name"] == "Kho A"
+    assert response.json()["data"]["nearby_location_code"] == "KHOA"
+
+    today = api_client.get("/api/attendance/today", headers=headers)
+    assert today.status_code == 200, today.text
+    open_session = today.json()["data"]["open_session"]
+    assert open_session["location_name"] == "Kho B"
+    assert open_session["nearby_location_name"] == "Kho A"
+    assert open_session["nearby_location_code"] == "KHOA"
+
+    history = api_client.get("/api/history", headers=headers)
+    assert history.status_code == 200, history.text
+    session_row = history.json()["data"]["days"][0]["unpaid_sessions"][0]
+    assert session_row["nearby_location_name"] == "Kho A"
+    assert session_row["nearby_location_code"] == "KHOA"
+
+
 async def test_gd7c_manager_api_fields_and_filters(api_client, pg_factory):
     async with pg_factory() as session:
         async with session.begin():

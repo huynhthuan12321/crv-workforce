@@ -208,7 +208,7 @@ function SameDaySessions({sessions}: {sessions: WorkSession[]}) {
       <b>Phiên khác cùng ngày</b>
       {sessions.map((session) => (
         <div className="session-row" key={session.id}>
-          <span>{fmtDate(session.check_in_at)} · {fmtTime(session.check_in_at)}–{session.check_out_at ? fmtTime(session.check_out_at) : "đang mở"}</span>
+          <span className="session-time">{fmtDate(session.check_in_at)} · {fmtTime(session.check_in_at)}–{session.check_out_at ? fmtTime(session.check_out_at) : "đang mở"}</span>
           <Chip tone={session.status === "open" ? "warning" : "neutral"}>{session.status === "open" ? "Đang mở" : session.status === "needs_review" ? "Cần xử lý" : "Đã đóng"}</Chip>
         </div>
       ))}

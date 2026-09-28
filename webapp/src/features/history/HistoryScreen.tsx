@@ -19,7 +19,7 @@ function SessionList({sessions, showReason = false}: {sessions: HistorySession[]
       {sessions.map((session) => (
         <div key={session.id} className="session-row">
           <div>
-            <b>{fmtTime(session.check_in_at)}–{fmtTime(session.check_out_at)}</b>
+            <b className="session-time">{fmtTime(session.check_in_at)}–{fmtTime(session.check_out_at)}</b>
             <small>{session.minutes == null ? "Chưa tính phút" : fmtDuration(session.minutes)}</small>
             {session.output?.length > 0 && <small>Sản lượng: {fmtKg(totalKg(session.output))}</small>}
           </div>

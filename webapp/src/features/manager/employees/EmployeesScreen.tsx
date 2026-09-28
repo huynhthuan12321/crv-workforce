@@ -24,6 +24,11 @@ function fmtDateTime(value?: string | null) {
   return `${fmtDate(value, {day: "2-digit", month: "2-digit", year: "numeric"})} ${fmtTime(value)}`;
 }
 
+function displayLocationReason(reason?: string | null) {
+  if (!reason) return null;
+  return reason.trim().toLowerCase() === "backfill kho01" ? "Kho ban đầu" : reason;
+}
+
 export function EmployeesScreen() {
   const scenario = mockScenario();
   const [rows, setRows] = useState<ManagedEmployee[]>([]);
@@ -468,7 +473,7 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
             <div className="session-row" key={item.id}>
               <span>{item.location_code} · {item.location_name}</span>
               <small>{fmtDateTime(item.effective_from)} – {fmtDateTime(item.effective_to)}</small>
-              {item.reason && <small>Lý do: {item.reason}</small>}
+              {displayLocationReason(item.reason) && <small>Lý do: {displayLocationReason(item.reason)}</small>}
               {item.changed_by_name && <small>Người đổi: {item.changed_by_name}</small>}
             </div>
           ))}

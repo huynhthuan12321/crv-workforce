@@ -49,6 +49,8 @@ class WorkSessionOut(BaseModel):
     location_radius_m: int | None = None
     nearby_location_id: int | None = None
     nearby_location_distance_m: float | None = None
+    nearby_location_code: str | None = None
+    nearby_location_name: str | None = None
 
 
 class ReviewSessionOut(WorkSessionOut):

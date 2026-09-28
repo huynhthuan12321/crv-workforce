@@ -182,6 +182,10 @@ export const openSession: WorkSession = {
   flags: [],
   check_in_distance_m: 12,
   check_out_distance_m: null,
+  location_code: "KHO01",
+  location_name: "Xưởng chính",
+  location_code_snapshot: "KHO01",
+  location_name_snapshot: "Xưởng chính",
 };
 
 export const closedSession: WorkSession = {
@@ -223,7 +227,7 @@ export function todayForScenario(scenario: MockScenario): Today {
     return {open_session: openSession, estimated_day_amount: 104000, paid_today: 0, ...meta};
   }
   if (scenario === "open_far") {
-    return {open_session: {...openSession, flags: ["gps_out_of_range"], check_in_distance_m: 250}, estimated_day_amount: 68000, paid_today: 0, ...meta};
+    return {open_session: {...openSession, flags: ["gps_out_of_range"], flag_source: "check_in", check_in_distance_m: 250, location_code_snapshot: "KHONHAP", location_name_snapshot: "Kho Nhập", nearby_location_code: "KHODONGGOI", nearby_location_name: "Kho Đóng gói thành phẩm", nearby_location_distance_m: 18}, estimated_day_amount: 68000, paid_today: 0, ...meta};
   }
   return {open_session: null, estimated_day_amount: 0, paid_today: 0, ...meta};
 }
@@ -260,6 +264,14 @@ export const mockHistory: History = {
           check_out_at: "2024-04-24T17:10:00+07:00",
           minutes: 245,
           amount_raw: 122500,
+          flags: ["gps_out_of_range"],
+          flag_source: "check_in",
+          check_in_distance_m: 474,
+          location_code_snapshot: "KHONHAP",
+          location_name_snapshot: "Kho Nhập",
+          nearby_location_code: "KHODONGGOI",
+          nearby_location_name: "Kho Đóng gói thành phẩm",
+          nearby_location_distance_m: 19,
           pay_batch_id: null,
           pending_reason: "cho_duyet",
           output_locked: false,
