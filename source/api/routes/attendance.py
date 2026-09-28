@@ -7,7 +7,7 @@ from source.api.workforce_auth import employee_only
 from source.database.models import EmployeeOrm
 from source.schemas.workforce import DataResponse, TodayOut, WorkSessionOut
 from source.services.rate_limit import attendance_rate_limiter
-from source.services.workforce import AttendanceService, session_dict
+from source.services.workforce import AttendanceService, session_dict_with_nearby
 
 router = APIRouter()
 
@@ -27,11 +27,11 @@ async def today(employee: EmployeeOrm = Depends(employee_only), session: AsyncSe
 async def check_in(body: LocationBody, employee: EmployeeOrm = Depends(employee_only), session: AsyncSession = Depends(get_session)):
     await attendance_rate_limiter.check(employee.id, "check-in")
     row = await AttendanceService(session).check_in(employee, body.lat, body.lng, body.accuracy_m)
-    return {"data": session_dict(row)}
+    return {"data": await session_dict_with_nearby(session, row)}
 
 
 @router.post("/check-out", response_model=DataResponse[WorkSessionOut])
 async def check_out(body: LocationBody, employee: EmployeeOrm = Depends(employee_only), session: AsyncSession = Depends(get_session)):
     await attendance_rate_limiter.check(employee.id, "check-out")
     row = await AttendanceService(session).check_out(employee, body.lat, body.lng, body.accuracy_m)
-    return {"data": session_dict(row)}
+    return {"data": await session_dict_with_nearby(session, row)}

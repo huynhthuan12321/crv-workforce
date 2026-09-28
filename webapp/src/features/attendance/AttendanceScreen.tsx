@@ -4,6 +4,7 @@ import {Button, Card, Chip, Metric, ScreenState} from "../../components/ui";
 import {elapsedMinutes, elapsedSeconds, temporarySalary} from "../../lib/clock";
 import {fmtClock, fmtDateLong, fmtDuration} from "../../lib/date-vn";
 import {fmtMoney} from "../../lib/format";
+import {gpsLabel} from "../../lib/gps-label";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
 import {canOpenTelegramLocationSettings, getCurrentLocation, openTelegramLocationSettings} from "../../lib/location";
 import {serverNow, syncServerClock} from "../../lib/server-clock";
@@ -28,12 +29,12 @@ function CheckInIcon({done = false}: {done?: boolean}) {
 function gpsText(session?: WorkSession | null) {
   if (!session) return null;
   if (session.flags.includes("gps_out_of_range")) {
-    return {tone: "warning" as const, text: `⚠ Ngoài phạm vi xưởng · cách ${Math.round(session.check_in_distance_m)} m. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra.`};
+    return {tone: "warning" as const, text: `⚠ ${gpsLabel(session)}. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra.`};
   }
   if (session.flags.includes("gps_low_accuracy")) {
-    return {tone: "warning" as const, text: "⚠ Độ chính xác vị trí thấp. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra."};
+    return {tone: "warning" as const, text: `⚠ ${gpsLabel(session)}. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra.`};
   }
-  return {tone: "success" as const, text: `Trong khu vực xưởng (${Math.round(session.check_in_distance_m)} m)`};
+  return {tone: "success" as const, text: gpsLabel(session)};
 }
 
 function actionErrorMessage(error: ApiError | Error): string {

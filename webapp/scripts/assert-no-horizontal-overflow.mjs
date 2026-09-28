@@ -27,6 +27,19 @@ try {
           clipped: Array.from(document.querySelectorAll(".bottom-tabs button, .bottom-tabs button em, .chip"))
             .filter((el) => el.scrollWidth > el.clientWidth + 1)
             .map((el) => `${el.className || el.tagName}: ${el.textContent?.trim()} (${el.scrollWidth}>${el.clientWidth})`),
+          verticalText: Array.from(document.querySelectorAll(".session-row span, .session-row b, .session-row small, .session-row strong, .history-block .chip"))
+            .filter((el) => {
+              const text = el.textContent?.trim() || "";
+              const rect = el.getBoundingClientRect();
+              if (!text || rect.width === 0 || rect.height === 0) return false;
+              const lineHeightRaw = window.getComputedStyle(el).lineHeight;
+              const fontSize = Number.parseFloat(window.getComputedStyle(el).fontSize) || 12;
+              const lineHeight = lineHeightRaw === "normal" ? fontSize * 1.25 : Number.parseFloat(lineHeightRaw);
+              const tooNarrow = text.length >= 12 && rect.width < 80;
+              const tooTall = lineHeight > 0 && rect.height > lineHeight * 4.2;
+              return tooNarrow || tooTall;
+            })
+            .map((el) => `${el.tagName}.${el.className || ""}: ${el.textContent?.trim()} (${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)})`),
         }));
         await page.close();
         if (result.scrollWidth !== result.clientWidth) {
@@ -34,6 +47,9 @@ try {
         }
         if (result.clipped.length) {
           failures.push(`${width}px ${theme} ${scenario}: clipped ${result.clipped.join("; ")}`);
+        }
+        if (result.verticalText.length) {
+          failures.push(`${width}px ${theme} ${scenario}: vertical text ${result.verticalText.join("; ")}`);
         }
       }
     }

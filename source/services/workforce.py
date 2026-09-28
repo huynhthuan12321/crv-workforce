@@ -249,6 +249,17 @@ def session_location_ref(row: WorkSessionOrm) -> dict:
     return {"id": row.work_location_id, "code": row.location_code_snapshot, "name": row.location_name_snapshot}
 
 
+async def session_dict_with_nearby(session: AsyncSession, row: WorkSessionOrm | None) -> dict | None:
+    data = session_dict(row)
+    if not row or not data:
+        return data
+    if row.nearby_location_id:
+        nearby = await session.get(WorkLocationOrm, row.nearby_location_id)
+        data["nearby_location_code"] = nearby.code if nearby else None
+        data["nearby_location_name"] = nearby.name if nearby else None
+    return data
+
+
 def session_event_ref(row: WorkSessionOrm) -> dict:
     return {
         "id": row.id,
@@ -467,7 +478,7 @@ class AttendanceService:
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
         can_check_in = opened is None and now.time() < settings.rules.checkin_cutoff
         location = await current_work_location(self.session, employee.id)
-        return {"open_session": session_dict(opened) if opened else None,
+        return {"open_session": await session_dict_with_nearby(self.session, opened) if opened else None,
                 "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0),
                 "server_now": iso_vn(now),
                 "checkin_cutoff": settings.rules.checkin_cutoff.strftime("%H:%M"),
@@ -491,6 +502,7 @@ class WorkingService:
         result = []
         for row in rows:
             employee = await self.session.get(EmployeeOrm, row.employee_id)
+            nearby = await self.session.get(WorkLocationOrm, row.nearby_location_id) if row.nearby_location_id else None
             check_in = _vn(row.check_in_at)
             result.append({
                 "session_id": row.id,
@@ -509,6 +521,8 @@ class WorkingService:
                 "location_name_snapshot": row.location_name_snapshot,
                 "nearby_location_id": row.nearby_location_id,
                 "nearby_location_distance_m": float(row.nearby_location_distance_m) if row.nearby_location_distance_m is not None else None,
+                "nearby_location_code": nearby.code if nearby else None,
+                "nearby_location_name": nearby.name if nearby else None,
                 "is_outside": "gps_out_of_range" in (row.flags or []),
                 "server_now": iso_vn(now),
             })
@@ -701,7 +715,7 @@ class ReviewService:
             "session_id": row.id,
             "min_check_out": iso_vn(min_check_out),
             "max_check_out": iso_vn(max_check_out),
-            "sessions": [session_dict(other) for other in others],
+            "sessions": [await session_dict_with_nearby(self.session, other) for other in others],
         }
 
     async def close_forgotten(self, actor: EmployeeOrm, session_id: int, check_out: datetime, reason: str) -> WorkSessionOrm:
@@ -939,7 +953,7 @@ class PayrollService:
             PayBatchOrm.work_date == day,
         ).order_by(PayBatchOrm.batch_no))).all())
         summary.update({
-            "sessions": [session_dict(row) | {
+            "sessions": [(await session_dict_with_nearby(self.session, row)) | {
                 "pay_batch_id": row.pay_batch_id,
                 "is_locked": row.pay_batch_id is not None,
             } for row in sessions],
@@ -1051,7 +1065,7 @@ class HistoryService:
         by_batch = {batch.id: [] for batch in batches}
         unpaid_by_day: dict[date, list[dict]] = {}
         for row in sessions:
-            data = session_dict(row) | {
+            data = (await session_dict_with_nearby(self.session, row)) | {
                 "pay_batch_id": row.pay_batch_id,
                 "pending_reason": self._pending_reason(row),
                 "output": await self._output_items(row.id),
@@ -1605,4 +1619,6 @@ def session_dict(row: WorkSessionOrm | None) -> dict | None:
             "location_name": row.location_name_snapshot,
             "location_radius_m": row.location_radius_m_snapshot,
             "nearby_location_id": row.nearby_location_id,
-            "nearby_location_distance_m": float(row.nearby_location_distance_m) if row.nearby_location_distance_m is not None else None}
+            "nearby_location_distance_m": float(row.nearby_location_distance_m) if row.nearby_location_distance_m is not None else None,
+            "nearby_location_code": getattr(row, "nearby_location_code", None),
+            "nearby_location_name": getattr(row, "nearby_location_name", None)}

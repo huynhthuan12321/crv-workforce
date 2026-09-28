@@ -30,4 +30,15 @@ describe("gps-label", () => {
   it("returns in-workshop text when there is no GPS flag", () => {
     expect(gpsLabel({flags: [], check_in_distance_m: 9})).toBe("Trong xưởng");
   });
+
+  it("uses assigned and nearby warehouse names for out-of-range labels", () => {
+    expect(gpsLabel({
+      flags: ["gps_out_of_range"],
+      flag_source: "check_in",
+      check_in_distance_m: 474,
+      location_name_snapshot: "Kho Nhập",
+      nearby_location_name: "Kho Đóng gói",
+      nearby_location_distance_m: 19,
+    })).toBe("Ngoài phạm vi Kho Nhập được phân công (474 m) · Đang trong phạm vi Kho Đóng gói (19 m)");
+  });
 });
