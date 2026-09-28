@@ -4,15 +4,16 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from source.config import settings
 from source.database.models import (
+    EmployeeLocationAssignmentOrm,
     AuditLogOrm, ConsentTextOrm, EmployeeOrm, InviteCodeOrm,
     LocationConsentOrm, NotificationOutboxOrm, OutputItemOrm, OutputLogOrm,
-    PayBatchOrm, ProductOrm, RateHistoryOrm, SyncOutboxOrm, WorkSessionOrm,
+    PayBatchOrm, ProductOrm, RateHistoryOrm, SyncOutboxOrm, WorkLocationOrm, WorkSessionOrm,
 )
 from source.domain.workforce_errors import fail
 from source.enums import EmployeeRole, SessionStatus
@@ -34,9 +35,10 @@ def ceil_money(value: Decimal, unit: int | None = None) -> int:
     return int((value / Decimal(unit)).to_integral_value(rounding=ROUND_CEILING) * unit)
 
 
-def _flags(distance: float, accuracy: float) -> list[str]:
+def _flags(distance: float, accuracy: float, radius_m: int | Decimal | None) -> list[str]:
     result = []
-    if distance > settings.workshop.radius_m:
+    radius = Decimal(str(radius_m or 0))
+    if Decimal(str(distance)) > radius:
         result.append("gps_out_of_range")
     if accuracy > settings.rules.gps_max_accuracy_m:
         result.append("gps_low_accuracy")
@@ -44,7 +46,13 @@ def _flags(distance: float, accuracy: float) -> list[str]:
 
 
 def _event(event_type: str, payload: dict) -> SyncOutboxOrm:
-    return SyncOutboxOrm(event_type=event_type, payload={"event_id": str(uuid.uuid4()), **payload})
+    return SyncOutboxOrm(event_type=event_type, payload={
+        "schema_version": 2,
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "occurred_at": iso_vn(Clock().now()),
+        **payload,
+    })
 
 
 def _notice(key: str, chat_id: int | None, kind: str, payload: dict) -> NotificationOutboxOrm | None:
@@ -66,18 +74,21 @@ def _has_unreviewed_flags(row: WorkSessionOrm) -> bool:
 
 
 def _flag_source(row: WorkSessionOrm) -> str | None:
+    if row.flag_source:
+        return row.flag_source
     if not row.flags:
         return None
+    radius = Decimal(str(row.location_radius_m_snapshot or 100))
     in_flagged = False
     out_flagged = False
     if "gps_out_of_range" in (row.flags or []):
         in_flagged = in_flagged or (
             row.check_in_distance_m is not None
-            and Decimal(row.check_in_distance_m) > Decimal(str(settings.workshop.radius_m))
+            and Decimal(row.check_in_distance_m) > radius
         )
         out_flagged = out_flagged or (
             row.check_out_distance_m is not None
-            and Decimal(row.check_out_distance_m) > Decimal(str(settings.workshop.radius_m))
+            and Decimal(row.check_out_distance_m) > radius
         )
     if "gps_low_accuracy" in (row.flags or []):
         in_flagged = in_flagged or (
@@ -174,7 +185,25 @@ async def has_open_session(session: AsyncSession, employee_id: int) -> bool:
     return opened is not None
 
 
+async def current_location_assignment(session: AsyncSession, employee_id: int, lock: bool = False) -> EmployeeLocationAssignmentOrm | None:
+    query = select(EmployeeLocationAssignmentOrm).where(
+        EmployeeLocationAssignmentOrm.employee_id == employee_id,
+        EmployeeLocationAssignmentOrm.effective_to.is_(None),
+    )
+    if lock:
+        query = query.with_for_update()
+    return await session.scalar(query)
+
+
+async def current_work_location(session: AsyncSession, employee_id: int) -> WorkLocationOrm | None:
+    assignment = await current_location_assignment(session, employee_id)
+    if not assignment:
+        return None
+    return await session.get(WorkLocationOrm, assignment.location_id)
+
+
 async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date | None = None) -> dict:
+    location = await current_work_location(session, row.id) if row.role == EmployeeRole.employee else None
     return {
         "id": row.id,
         "code": row.code,
@@ -185,6 +214,52 @@ async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date
         "current_hourly_rate": await current_hourly_rate(session, row.id, day),
         "is_linked": row.telegram_id is not None,
         "has_open_session": await has_open_session(session, row.id),
+        "work_location": location_dict(location) if location else None,
+    }
+
+
+async def employee_ref(session: AsyncSession, employee_id: int) -> dict:
+    employee = await session.get(EmployeeOrm, employee_id)
+    return {"id": employee_id, "code": employee.code if employee else "", "name": employee.full_name if employee else ""}
+
+
+def session_location_ref(row: WorkSessionOrm) -> dict:
+    return {"id": row.work_location_id, "code": row.location_code_snapshot, "name": row.location_name_snapshot}
+
+
+def session_event_ref(row: WorkSessionOrm) -> dict:
+    return {
+        "id": row.id,
+        "work_date": str(row.work_date),
+        "check_in_at": iso_vn(row.check_in_at),
+        "check_out_at": iso_vn(row.check_out_at),
+        "minutes": row.minutes,
+        "rate_snapshot": row.rate_snapshot,
+        "amount_raw": str(row.amount_raw) if row.amount_raw is not None else None,
+        "flags": row.flags or [],
+        "flag_source": _flag_source(row),
+        "location_id": row.work_location_id,
+        "location": session_location_ref(row),
+    }
+
+
+def location_dict(row: WorkLocationOrm | None) -> dict | None:
+    if not row:
+        return None
+    return {
+        "id": row.id,
+        "code": row.code,
+        "name": row.name,
+        "location_type": row.location_type,
+        "address": row.address,
+        "latitude": float(row.latitude),
+        "longitude": float(row.longitude),
+        "radius_m": row.radius_m,
+        "coordinate_source": row.coordinate_source,
+        "location_accuracy_m": float(row.location_accuracy_m) if row.location_accuracy_m is not None else None,
+        "is_active": row.is_active,
+        "created_at": iso_vn(row.created_at),
+        "updated_at": iso_vn(row.updated_at),
     }
 
 
@@ -266,6 +341,32 @@ class AttendanceService:
             raise fail("NO_RATE")
         return rate
 
+    async def _nearby_location(self, assigned_id: int, lat: float, lng: float) -> tuple[int | None, Decimal | None]:
+        rows = (await self.session.scalars(select(WorkLocationOrm).where(
+            WorkLocationOrm.is_active.is_(True),
+            WorkLocationOrm.id != assigned_id,
+        ))).all()
+        best_id: int | None = None
+        best_distance: float | None = None
+        for location in rows:
+            distance = haversine_m(lat, lng, float(location.latitude), float(location.longitude))
+            if distance <= location.radius_m and (best_distance is None or distance < best_distance):
+                best_id = location.id
+                best_distance = distance
+        return best_id, Decimal(str(best_distance)) if best_distance is not None else None
+
+    async def _assigned_location_for_check_in(self, employee_id: int) -> WorkLocationOrm:
+        await self.session.scalar(select(EmployeeOrm).where(EmployeeOrm.id == employee_id).with_for_update())
+        assignment = await current_location_assignment(self.session, employee_id, lock=True)
+        if not assignment:
+            raise fail("LOCATION_REQUIRED", 409)
+        location = await self.session.scalar(select(WorkLocationOrm).where(
+            WorkLocationOrm.id == assignment.location_id,
+        ).with_for_update(read=True))
+        if not location or not location.is_active:
+            raise fail("LOCATION_INACTIVE")
+        return location
+
     async def check_in(self, employee: EmployeeOrm, lat: float, lng: float, accuracy_m: float) -> WorkSessionOrm:
         now = _vn(self.clock.now())
         _, consented = await current_consent(self.session, employee.id, now)
@@ -273,18 +374,29 @@ class AttendanceService:
             raise fail("LOCATION_CONSENT_REQUIRED")
         if now.time() >= settings.rules.checkin_cutoff:
             raise fail("CHECKIN_AFTER_CUTOFF")
+        location = await self._assigned_location_for_check_in(employee.id)
         opened = await self.session.scalar(select(WorkSessionOrm.id).where(
             WorkSessionOrm.employee_id == employee.id, WorkSessionOrm.status == SessionStatus.open))
         if opened:
             raise fail("SESSION_ALREADY_OPEN")
-        distance = haversine_m(lat, lng, settings.workshop.lat, settings.workshop.lng)
+        distance = haversine_m(lat, lng, float(location.latitude), float(location.longitude))
+        nearby_id, nearby_distance = await self._nearby_location(location.id, lat, lng)
         row = WorkSessionOrm(
             employee_id=employee.id, work_date=now.date(), check_in_at=now,
             check_in_lat=Decimal(str(lat)), check_in_lng=Decimal(str(lng)),
             check_in_accuracy_m=Decimal(str(accuracy_m)), check_in_distance_m=Decimal(str(distance)),
+            work_location_id=location.id,
+            location_code_snapshot=location.code,
+            location_name_snapshot=location.name,
+            location_lat_snapshot=location.latitude,
+            location_lng_snapshot=location.longitude,
+            location_radius_m_snapshot=location.radius_m,
+            nearby_location_id=nearby_id,
+            nearby_location_distance_m=nearby_distance,
             rate_snapshot=await self._rate(employee.id, now.date()),
-            status=SessionStatus.open, flags=_flags(distance, accuracy_m),
+            status=SessionStatus.open, flags=_flags(distance, accuracy_m, location.radius_m),
         )
+        row.flag_source = _flag_source(row)
         self.session.add(row)
         try:
             await self.session.flush()
@@ -300,16 +412,21 @@ class AttendanceService:
         ).with_for_update())
         if not row:
             raise fail("NO_OPEN_SESSION")
-        distance = haversine_m(lat, lng, settings.workshop.lat, settings.workshop.lng)
+        distance = haversine_m(lat, lng, float(row.location_lat_snapshot), float(row.location_lng_snapshot))
         row.check_out_at = now
         row.check_out_lat, row.check_out_lng = Decimal(str(lat)), Decimal(str(lng))
         row.check_out_accuracy_m, row.check_out_distance_m = Decimal(str(accuracy_m)), Decimal(str(distance))
-        row.flags = list(dict.fromkeys([*(row.flags or []), *_flags(distance, accuracy_m)]))
+        row.flags = list(dict.fromkeys([*(row.flags or []), *_flags(distance, accuracy_m, row.location_radius_m_snapshot)]))
+        row.flag_source = _flag_source(row)
         row.minutes = max(0, int((now - _vn(row.check_in_at)).total_seconds() // 60))
         row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
         row.status, row.closed_by = SessionStatus.closed, employee.id
         self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
-        self.session.add(_event("session_closed", {"session_id": row.id, "employee_id": employee.id}))
+        self.session.add(_event("session_closed", {
+            "employee": await employee_ref(self.session, employee.id),
+            "location": session_location_ref(row),
+            "session": session_event_ref(row),
+        }))
         await self.session.flush()
         return row
 
@@ -325,23 +442,28 @@ class AttendanceService:
         paid = await self.session.scalar(select(func.coalesce(func.sum(PayBatchOrm.amount), 0)).where(
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
         can_check_in = opened is None and now.time() < settings.rules.checkin_cutoff
+        location = await current_work_location(self.session, employee.id)
         return {"open_session": session_dict(opened) if opened else None,
                 "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0),
                 "server_now": iso_vn(now),
                 "checkin_cutoff": settings.rules.checkin_cutoff.strftime("%H:%M"),
-                "can_check_in": can_check_in}
+                "can_check_in": can_check_in,
+                "work_location": location_dict(location) if location else None}
 
 
 class WorkingService:
     def __init__(self, session: AsyncSession, clock: Clock | None = None):
         self.session, self.clock = session, clock or Clock()
 
-    async def working_now(self) -> list[dict]:
+    async def working_now(self, location_id: int | None = None) -> list[dict]:
         now = _vn(self.clock.now())
-        rows = list((await self.session.scalars(select(WorkSessionOrm).where(
+        filters = [
             WorkSessionOrm.status == SessionStatus.open,
             WorkSessionOrm.work_date == now.date(),
-        ).order_by(WorkSessionOrm.check_in_at))).all())
+        ]
+        if location_id:
+            filters.append(WorkSessionOrm.work_location_id == location_id)
+        rows = list((await self.session.scalars(select(WorkSessionOrm).where(*filters).order_by(WorkSessionOrm.check_in_at))).all())
         result = []
         for row in rows:
             employee = await self.session.get(EmployeeOrm, row.employee_id)
@@ -406,7 +528,12 @@ class OutputService:
             total += kg
             self.session.add(OutputItemOrm(output_log_id=output.id, product_id=product.id, bags=bags, kg=kg))
         output.submitted_at = now
-        self.session.add(_event("output_submitted", {"session_id": session_id, "items": values}))
+        self.session.add(_event("output_submitted", {
+            "employee": await employee_ref(self.session, work.employee_id),
+            "location": session_location_ref(work),
+            "session": {"id": session_id},
+            "items": values,
+        }))
         await self.session.flush()
         return {"session_id": session_id, "total_kg": float(total), "locked_at": iso_vn(output.locked_at)}
 
@@ -435,11 +562,14 @@ class ReviewService:
             "action": "flags_reviewed" if row.flags_reviewed_at else "session_closed",
         }
 
-    async def pending(self, type_: str | None = None) -> list[dict]:
-        rows = (await self.session.scalars(select(WorkSessionOrm).where(or_(
+    async def pending(self, type_: str | None = None, location_id: int | None = None) -> list[dict]:
+        filters = [or_(
             WorkSessionOrm.status == SessionStatus.needs_review,
             WorkSessionOrm.status == SessionStatus.closed,
-        )).order_by(WorkSessionOrm.check_in_at))).all()
+        )]
+        if location_id:
+            filters.append(WorkSessionOrm.work_location_id == location_id)
+        rows = (await self.session.scalars(select(WorkSessionOrm).where(*filters).order_by(WorkSessionOrm.check_in_at))).all()
         result = []
         for row in rows:
             row_type = _review_type(row)
@@ -456,11 +586,14 @@ class ReviewService:
         self.session.add(AuditLogOrm(actor_id=actor.id, action="flags_reviewed", entity_type="work_session", entity_id=row.id))
         return row
 
-    async def list_resolved(self, type_: str | None = None) -> list[dict]:
-        rows = (await self.session.scalars(select(WorkSessionOrm).where(or_(
+    async def list_resolved(self, type_: str | None = None, location_id: int | None = None) -> list[dict]:
+        filters = [or_(
             WorkSessionOrm.flags_reviewed_at.is_not(None),
             WorkSessionOrm.closed_by.is_not(None),
-        )).order_by(WorkSessionOrm.updated_at.desc()))).all()
+        )]
+        if location_id:
+            filters.append(WorkSessionOrm.work_location_id == location_id)
+        rows = (await self.session.scalars(select(WorkSessionOrm).where(*filters).order_by(WorkSessionOrm.updated_at.desc()))).all()
         resolved = []
         for row in rows:
             row_type = "gps" if row.flags_reviewed_at else "forgot"
@@ -554,7 +687,11 @@ class ReviewService:
         row.status, row.closed_by = SessionStatus.closed, actor.id
         self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
         self.session.add(AuditLogOrm(actor_id=actor.id, action="session_close_by_manager", entity_type="work_session", entity_id=row.id, reason=reason))
-        self.session.add(_event("session_closed", {"session_id": row.id, "employee_id": row.employee_id}))
+        self.session.add(_event("session_closed", {
+            "employee": await employee_ref(self.session, row.employee_id),
+            "location": session_location_ref(row),
+            "session": session_event_ref(row),
+        }))
         employee = await self.session.get(EmployeeOrm, row.employee_id)
         notice = _notice(f"forgot-closed:{row.id}", employee.telegram_id if employee else None,
                          "forgot_session_closed", {"session_id": row.id,
@@ -620,8 +757,9 @@ class ReviewService:
             reason=reason,
         ))
         self.session.add(_event("session_updated", {
-            "session_id": row.id,
-            "employee_id": row.employee_id,
+            "employee": await employee_ref(self.session, row.employee_id),
+            "location": session_location_ref(row),
+            "session": {"id": row.id},
             "old": old_value,
             "new": new_value,
             "reason": reason,
@@ -694,6 +832,8 @@ class PayrollService:
         unreviewed = [row.id for row in all_sessions if row.status == SessionStatus.closed and _has_unreviewed_flags(row)]
         needs_review = [row.id for row in all_sessions if row.status == SessionStatus.needs_review]
         has_open = any(row.status == SessionStatus.open for row in all_sessions)
+        location_ids = sorted({row.work_location_id for row in all_sessions if row.work_location_id is not None})
+        location_names = sorted({row.location_name_snapshot for row in all_sessions if row.location_name_snapshot})
         pending_reasons = []
         if unreviewed:
             pending_reasons.append("unreviewed_gps")
@@ -722,13 +862,22 @@ class PayrollService:
             "needs_review_session_ids": needs_review,
             "pending_reason": pending_reasons[0] if pending_reasons else None,
             "pending_reasons": pending_reasons,
+            "work_location_ids": location_ids,
+            "work_location_names": location_names,
+            "has_multiple_locations": len(location_ids) > 1,
         }
 
-    async def list_payroll(self, day: date) -> list[dict]:
-        employees = list((await self.session.scalars(select(EmployeeOrm).where(
+    async def list_payroll(self, day: date, location_id: int | None = None) -> list[dict]:
+        query = select(EmployeeOrm).where(
             EmployeeOrm.role == EmployeeRole.employee,
             EmployeeOrm.is_active.is_(True),
-        ).order_by(EmployeeOrm.code))).all())
+        )
+        if location_id:
+            query = query.where(EmployeeOrm.id.in_(select(WorkSessionOrm.employee_id).where(
+                WorkSessionOrm.work_date == day,
+                WorkSessionOrm.work_location_id == location_id,
+            )))
+        employees = list((await self.session.scalars(query.order_by(EmployeeOrm.code))).all())
         return [await self._payroll_summary(employee, day) for employee in employees]
 
     async def get_employee_payroll_detail(self, employee_id: int, day: date) -> dict:
@@ -778,9 +927,15 @@ class PayrollService:
         for row in eligible:
             row.pay_batch_id = batch.id
         self.session.add(AuditLogOrm(actor_id=actor.id, action="batch_approved", entity_type="pay_batch", entity_id=batch.id))
-        self.session.add(_event("batch_paid", {"batch_id": batch.id, "employee_id": employee_id,
-                                               "amount": amount, "session_ids": [x.id for x in eligible]}))
         employee = await self.session.get(EmployeeOrm, employee_id)
+        location_map = {row.work_location_id: session_location_ref(row) for row in eligible if row.work_location_id is not None}
+        self.session.add(_event("batch_paid", {
+            "employee": await employee_ref(self.session, employee_id),
+            "locations": list(location_map.values()),
+            "batch": {"id": batch.id, "work_date": str(day), "batch_no": batch.batch_no,
+                      "amount": amount, "approved_by": actor.id, "approved_at": iso_vn(batch.approved_at)},
+            "sessions": [{"id": row.id, "location_id": row.work_location_id} for row in eligible],
+        }))
         notice = _notice(f"batch-paid:{batch.id}", employee.telegram_id if employee else None,
                          "batch_paid", {"batch_no": batch_no, "date": fmt_date_vn(day), "amount": amount,
                                         "paid_total": paid + amount, "button": _tab_button("Mở ứng dụng", "history")})
@@ -955,31 +1110,39 @@ class ReportService:
             current += timedelta(days=1)
         return result
 
-    async def summary(self, period: str, day: date, employee_id: int | None = None) -> dict:
+    async def summary(self, period: str, day: date, employee_id: int | None = None, location_id: int | None = None) -> dict:
         start, end = self.bounds(period, day)
         filters = [WorkSessionOrm.work_date.between(start, end), WorkSessionOrm.status == SessionStatus.closed]
         if employee_id:
             filters.append(WorkSessionOrm.employee_id == employee_id)
+        if location_id:
+            filters.append(WorkSessionOrm.work_location_id == location_id)
         minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
         production = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
             func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
             .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
-        salary_days = await self._salary_for_days(start, end, employee_id)
-        paid = sum(x["paid"] for x in salary_days.values())
-        pending = sum(x["pending"] for x in salary_days.values())
-        pending_eligible = sum(x["pending_eligible"] for x in salary_days.values())
-        pending_blocked = sum(x["pending_blocked"] for x in salary_days.values())
-        needs_review_count = sum(x["needs_review_count"] for x in salary_days.values())
+        if location_id:
+            raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(*filters)) or 0)
+            paid = pending = pending_eligible = pending_blocked = needs_review_count = 0
+            total = int(raw)
+        else:
+            salary_days = await self._salary_for_days(start, end, employee_id)
+            paid = sum(x["paid"] for x in salary_days.values())
+            pending = sum(x["pending"] for x in salary_days.values())
+            pending_eligible = sum(x["pending_eligible"] for x in salary_days.values())
+            pending_blocked = sum(x["pending_blocked"] for x in salary_days.values())
+            needs_review_count = sum(x["needs_review_count"] for x in salary_days.values())
+            total = paid + pending
         return {"from": start, "to": end, "minutes": minutes,
                 "salary": {"paid": paid, "pending": pending, "pending_eligible": pending_eligible,
                            "pending_blocked": pending_blocked, "needs_review_count": needs_review_count,
-                           "total": paid + pending},
+                           "total": total},
                 "paid": paid, "pending": pending, "pending_eligible": pending_eligible,
                 "pending_blocked": pending_blocked, "needs_review_count": needs_review_count,
-                "total": paid + pending,
+                "total": total,
                 "bags": int(production[0]), "kg": float(production[1])}
 
-    async def products(self, period: str, day: date, employee_id: int | None = None) -> list[dict]:
+    async def products(self, period: str, day: date, employee_id: int | None = None, location_id: int | None = None) -> list[dict]:
         start, end = self.bounds(period, day)
         products = list((await self.session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
         result = []
@@ -987,6 +1150,8 @@ class ReportService:
             filters = [WorkSessionOrm.work_date.between(start, end), OutputItemOrm.product_id == product.id]
             if employee_id:
                 filters.append(WorkSessionOrm.employee_id == employee_id)
+            if location_id:
+                filters.append(WorkSessionOrm.work_location_id == location_id)
             bags, kg = (await self.session.execute(select(
                 func.coalesce(func.sum(OutputItemOrm.bags), 0),
                 func.coalesce(func.sum(OutputItemOrm.kg), 0),
@@ -994,20 +1159,26 @@ class ReportService:
             result.append({"code": product.code, "name": product.name, "bags": int(bags), "kg": float(kg)})
         return result
 
-    async def timeseries(self, period: str, day: date, employee_id: int | None = None) -> list[dict]:
+    async def timeseries(self, period: str, day: date, employee_id: int | None = None, location_id: int | None = None) -> list[dict]:
         start, end = self.bounds(period, day)
-        salary_days = await self._salary_for_days(start, end, employee_id)
+        salary_days = {} if location_id else await self._salary_for_days(start, end, employee_id)
         rows = []
         current = start
         while current <= end:
             filters = [WorkSessionOrm.work_date == current, WorkSessionOrm.status == SessionStatus.closed]
             if employee_id:
                 filters.append(WorkSessionOrm.employee_id == employee_id)
+            if location_id:
+                filters.append(WorkSessionOrm.work_location_id == location_id)
             minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
             bags, kg = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
                 func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
                 .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
-            salary = salary_days[current]
+            if location_id:
+                raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(*filters)) or 0)
+                salary = {"total": int(raw), "paid": 0, "pending": 0, "pending_eligible": 0, "pending_blocked": 0, "needs_review_count": 0}
+            else:
+                salary = salary_days[current]
             rows.append({"date": current, "minutes": minutes, "salary": salary["total"],
                          "paid": salary["paid"], "pending": salary["pending"],
                          "pending_eligible": salary["pending_eligible"],
@@ -1016,6 +1187,139 @@ class ReportService:
                          "bags": int(bags), "kg": float(kg)})
             current += timedelta(days=1)
         return rows
+
+
+class WorkLocationService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session, self.clock = session, clock or Clock()
+
+    def _validate_location(self, latitude: float, longitude: float, radius_m: int, coordinate_source: str) -> None:
+        if not (8 <= latitude <= 24 and 102 <= longitude <= 110):
+            raise fail("LOCATION_INVALID", 422)
+        if not (30 <= radius_m <= 1000):
+            raise fail("LOCATION_INVALID", 422)
+        if coordinate_source not in {"device_gps", "manual_coordinates"}:
+            raise fail("LOCATION_INVALID", 422)
+
+    async def list_locations(self, active: bool | None = None, q: str | None = None) -> list[dict]:
+        query = select(WorkLocationOrm)
+        if active is not None:
+            query = query.where(WorkLocationOrm.is_active.is_(active))
+        if q:
+            like = f"%{q.strip()}%"
+            query = query.where(or_(WorkLocationOrm.code.ilike(like), WorkLocationOrm.name.ilike(like)))
+        rows = (await self.session.scalars(query.order_by(WorkLocationOrm.code))).all()
+        return [location_dict(row) for row in rows]
+
+    async def create(
+        self,
+        actor: EmployeeOrm,
+        code: str,
+        name: str,
+        address: str | None,
+        latitude: float,
+        longitude: float,
+        radius_m: int,
+        coordinate_source: str,
+        location_accuracy_m: float | None,
+        low_accuracy_confirmed: bool = False,
+    ) -> dict:
+        self._validate_location(latitude, longitude, radius_m, coordinate_source)
+        if coordinate_source == "manual_coordinates":
+            location_accuracy_m = None
+        if coordinate_source == "device_gps" and location_accuracy_m is not None and location_accuracy_m > 100 and not low_accuracy_confirmed:
+            raise fail("LOCATION_INVALID", 422, details={"reason": "low_accuracy_requires_confirmation"})
+        row = WorkLocationOrm(
+            code=code,
+            name=name,
+            address=address,
+            latitude=Decimal(str(latitude)),
+            longitude=Decimal(str(longitude)),
+            radius_m=radius_m,
+            coordinate_source=coordinate_source,
+            location_accuracy_m=Decimal(str(location_accuracy_m)) if location_accuracy_m is not None else None,
+            is_active=True,
+            created_by=actor.id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        if coordinate_source == "device_gps" and location_accuracy_m is not None and location_accuracy_m > 100:
+            self.session.add(AuditLogOrm(actor_id=actor.id, action="location_saved_with_low_accuracy",
+                                         entity_type="work_location", entity_id=row.id,
+                                         new_value={"accuracy_m": location_accuracy_m, "confirmed_by": actor.id,
+                                                    "confirmed_at": iso_vn(self.clock.now())}))
+        return location_dict(row)
+
+    async def update(self, actor: EmployeeOrm, location_id: int, **values) -> dict:
+        row = await self.session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update())
+        if not row:
+            raise fail("LOCATION_NOT_FOUND", 404)
+        latitude = float(values.get("latitude", row.latitude))
+        longitude = float(values.get("longitude", row.longitude))
+        radius_m = int(values.get("radius_m", row.radius_m))
+        coordinate_source = values.get("coordinate_source", row.coordinate_source)
+        self._validate_location(latitude, longitude, radius_m, coordinate_source)
+        old = location_dict(row)
+        for field in ["code", "name", "address"]:
+            if field in values and values[field] is not None:
+                setattr(row, field, values[field])
+        row.latitude = Decimal(str(latitude))
+        row.longitude = Decimal(str(longitude))
+        row.radius_m = radius_m
+        row.coordinate_source = coordinate_source
+        if coordinate_source == "manual_coordinates":
+            row.location_accuracy_m = None
+        elif "location_accuracy_m" in values:
+            row.location_accuracy_m = Decimal(str(values["location_accuracy_m"])) if values["location_accuracy_m"] is not None else None
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="location_updated", entity_type="work_location",
+                                     entity_id=row.id, old_value=old, new_value=location_dict(row)))
+        return location_dict(row)
+
+    async def set_active(self, actor: EmployeeOrm, location_id: int, active: bool) -> dict:
+        row = await self.session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update())
+        if not row:
+            raise fail("LOCATION_NOT_FOUND", 404)
+        if not active:
+            assignments = int(await self.session.scalar(select(func.count()).select_from(EmployeeLocationAssignmentOrm).where(
+                EmployeeLocationAssignmentOrm.location_id == location_id,
+                EmployeeLocationAssignmentOrm.effective_to.is_(None),
+            )) or 0)
+            open_sessions = int(await self.session.scalar(select(func.count()).select_from(WorkSessionOrm).where(
+                WorkSessionOrm.work_location_id == location_id,
+                WorkSessionOrm.status == SessionStatus.open,
+            )) or 0)
+            if assignments or open_sessions:
+                raise fail("LOCATION_IN_USE", details={"current_assignments": assignments, "open_sessions": open_sessions})
+        row.is_active = active
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="location_activated" if active else "location_deactivated",
+                                     entity_type="work_location", entity_id=row.id))
+        return location_dict(row)
+
+    async def assign_employee(self, actor: EmployeeOrm, employee_id: int, location_id: int, reason: str) -> dict:
+        if len(reason.strip()) < 5 or len(reason) > 200:
+            raise fail("REASON_REQUIRED", 422)
+        employee = await self.session.scalar(select(EmployeeOrm).where(EmployeeOrm.id == employee_id).with_for_update())
+        if not employee or employee.role != EmployeeRole.employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        current = await current_location_assignment(self.session, employee_id, lock=True)
+        location = await self.session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update(read=True))
+        if not location:
+            raise fail("LOCATION_NOT_FOUND", 404)
+        if not location.is_active:
+            raise fail("LOCATION_INACTIVE")
+        now = _vn(self.clock.now())
+        if current and current.location_id == location_id:
+            return await employee_admin_dict(self.session, employee, now.date())
+        old_value = {"location_id": current.location_id if current else None}
+        if current:
+            current.effective_to = now
+        self.session.add(EmployeeLocationAssignmentOrm(employee_id=employee_id, location_id=location_id,
+                                                       effective_from=now, changed_by=actor.id, reason=reason))
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_location_changed",
+                                     entity_type="employee", entity_id=employee_id,
+                                     old_value=old_value, new_value={"location_id": location_id}, reason=reason))
+        await self.session.flush()
+        return await employee_admin_dict(self.session, employee, now.date())
 
 
 class EmployeeService:
@@ -1032,8 +1336,8 @@ class EmployeeService:
         rows = (await self.session.scalars(query.order_by(EmployeeOrm.code))).all()
         return [await employee_admin_dict(self.session, row, _vn(self.clock.now()).date()) for row in rows]
 
-    async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int, effective_from: date) -> dict:
-        employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, self.clock)
+    async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int, effective_from: date, location_id: int) -> dict:
+        employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, location_id, self.clock)
         data = await employee_admin_dict(self.session, employee, effective_from)
         return data | {"invite_url": invite}
 
@@ -1102,17 +1406,27 @@ class EmployeeService:
 
 
 async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, name: str,
-                          hourly_rate: int, effective_from: date,
+                          hourly_rate: int, effective_from: date, location_id: int | None = None,
                           clock: Clock | None = None) -> tuple[EmployeeOrm, str]:
     clock = clock or Clock()
     today = _vn(clock.now()).date()
     if effective_from < today or hourly_rate <= 0:
         raise fail("INVALID_EMPLOYEE_DATA", 422)
+    if location_id is None:
+        location_id = await session.scalar(select(WorkLocationOrm.id).where(WorkLocationOrm.code == "KHO01"))
+    location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.id == location_id).with_for_update(read=True))
+    if not location:
+        raise fail("LOCATION_NOT_FOUND", 404)
+    if not location.is_active:
+        raise fail("LOCATION_INACTIVE")
     employee = EmployeeOrm(code=code, full_name=name, role=EmployeeRole.employee)
     session.add(employee)
     await session.flush()
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=hourly_rate,
                                effective_from=effective_from, created_by=actor.id))
+    session.add(EmployeeLocationAssignmentOrm(employee_id=employee.id, location_id=location.id,
+                                             effective_from=clock.now(), changed_by=actor.id,
+                                             reason="Phân công khi tạo nhân viên"))
     invite = await create_invite(session, employee, actor.id, clock.now())
     session.add(AuditLogOrm(actor_id=actor.id, action="employee_created", entity_type="employee", entity_id=employee.id))
     return employee, invite
@@ -1130,4 +1444,10 @@ def session_dict(row: WorkSessionOrm | None) -> dict | None:
             "check_in_accuracy_m": float(row.check_in_accuracy_m) if row.check_in_accuracy_m is not None else None,
             "check_in_distance_m": float(row.check_in_distance_m),
             "check_out_accuracy_m": float(row.check_out_accuracy_m) if row.check_out_accuracy_m is not None else None,
-            "check_out_distance_m": float(row.check_out_distance_m) if row.check_out_distance_m is not None else None}
+            "check_out_distance_m": float(row.check_out_distance_m) if row.check_out_distance_m is not None else None,
+            "work_location_id": row.work_location_id,
+            "location_code": row.location_code_snapshot,
+            "location_name": row.location_name_snapshot,
+            "location_radius_m": row.location_radius_m_snapshot,
+            "nearby_location_id": row.nearby_location_id,
+            "nearby_location_distance_m": float(row.nearby_location_distance_m) if row.nearby_location_distance_m is not None else None}

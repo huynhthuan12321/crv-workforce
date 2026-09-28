@@ -8,7 +8,7 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import attendance, consent, employees, history, outputs, payroll, reports, review, working
+from source.api.routes import attendance, consent, employees, history, locations, outputs, payroll, reports, review, working
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
@@ -27,7 +27,7 @@ async def workforce_error_handler(_, exc: WorkforceError):
 
 
 def setup_api(app: FastAPI) -> None:
-    app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
+    app.add_middleware(RateLimitMiddleware, requests_per_minute=1000)
     app.add_middleware(LoggingMiddleware)
 
     app.add_middleware(CORSMiddleware, **cors_settings())
@@ -45,6 +45,7 @@ def setup_api(app: FastAPI) -> None:
     app.include_router(review.router, prefix=f"{API_PREFIX}/review", tags=["Review"])
     app.include_router(payroll.router, prefix=f"{API_PREFIX}/payroll", tags=["Payroll"])
     app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
+    app.include_router(locations.router, prefix=f"{API_PREFIX}/locations", tags=["Locations"])
     app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
 
     @app.on_event("startup")

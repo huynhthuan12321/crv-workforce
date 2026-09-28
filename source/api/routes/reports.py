@@ -21,20 +21,20 @@ async def employees(q: str | None = None, _: EmployeeOrm = Depends(director_only
 
 @router.get("/summary", response_model=DataResponse[ReportSummaryOut])
 async def summary(period: str = Query(pattern="^(day|week|month)$"), date_: date = Query(alias="date"),
-                  employee_id: int | None = None, _: EmployeeOrm = Depends(director_only),
+                  employee_id: int | None = None, location_id: int | None = None, _: EmployeeOrm = Depends(director_only),
                   session: AsyncSession = Depends(get_session)):
-    return {"data": await ReportService(session).summary(period, date_, employee_id)}
+    return {"data": await ReportService(session).summary(period, date_, employee_id, location_id)}
 
 
 @router.get("/products", response_model=DataResponse[list[ProductTotalOut]])
 async def products(period: str = Query(pattern="^(day|week|month)$"), date_: date = Query(alias="date"),
-                   employee_id: int | None = None, _: EmployeeOrm = Depends(director_only),
+                   employee_id: int | None = None, location_id: int | None = None, _: EmployeeOrm = Depends(director_only),
                    session: AsyncSession = Depends(get_session)):
-    return {"data": await ReportService(session).products(period, date_, employee_id)}
+    return {"data": await ReportService(session).products(period, date_, employee_id, location_id)}
 
 
 @router.get("/timeseries", response_model=DataResponse[list[ReportTimeseriesOut]])
 async def timeseries(period: str = Query(pattern="^(day|week|month)$"), date_: date = Query(alias="date"),
-                     employee_id: int | None = None, _: EmployeeOrm = Depends(director_only),
+                     employee_id: int | None = None, location_id: int | None = None, _: EmployeeOrm = Depends(director_only),
                      session: AsyncSession = Depends(get_session)):
-    return {"data": await ReportService(session).timeseries(period, date_, employee_id)}
+    return {"data": await ReportService(session).timeseries(period, date_, employee_id, location_id)}

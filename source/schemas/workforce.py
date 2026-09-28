@@ -43,6 +43,12 @@ class WorkSessionOut(BaseModel):
     check_in_distance_m: float
     check_out_accuracy_m: float | None = None
     check_out_distance_m: float | None
+    work_location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    location_radius_m: int | None = None
+    nearby_location_id: int | None = None
+    nearby_location_distance_m: float | None = None
 
 
 class ReviewSessionOut(WorkSessionOut):
@@ -72,6 +78,7 @@ class TodayOut(BaseModel):
     server_now: str
     checkin_cutoff: str
     can_check_in: bool
+    work_location: dict | None = None
 
 
 class EmployeeOut(BaseModel):
@@ -84,6 +91,34 @@ class EmployeeOut(BaseModel):
     current_hourly_rate: int | None = None
     is_linked: bool | None = None
     has_open_session: bool | None = None
+    work_location: dict | None = None
+
+
+class WorkLocationOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    location_type: str
+    address: str | None = None
+    latitude: float
+    longitude: float
+    radius_m: int
+    coordinate_source: str
+    location_accuracy_m: float | None = None
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+
+class EmployeeLocationAssignmentOut(BaseModel):
+    id: int
+    employee_id: int
+    location_id: int
+    location_code: str
+    location_name: str
+    effective_from: str
+    effective_to: str | None = None
+    reason: str | None = None
 
 
 class WorkingNowOut(BaseModel):
@@ -130,6 +165,9 @@ class PayrollSummaryOut(BaseModel):
     needs_review_session_ids: list[int] = []
     pending_reason: str | None = None
     pending_reasons: list[str] = []
+    work_location_ids: list[int] = []
+    work_location_names: list[str] = []
+    has_multiple_locations: bool = False
 
 
 class OutputSubmitOut(BaseModel):

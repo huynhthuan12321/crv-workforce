@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from source.api.dependencies import get_session
@@ -11,5 +11,5 @@ router = APIRouter()
 
 
 @router.get("", response_model=DataResponse[list[WorkingNowOut]])
-async def working_now(_: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
-    return {"data": await WorkingService(session).working_now()}
+async def working_now(location_id: int | None = Query(default=None), _: EmployeeOrm = Depends(manager_only), session: AsyncSession = Depends(get_session)):
+    return {"data": await WorkingService(session).working_now(location_id)}

@@ -21,6 +21,8 @@ from source.database.models import (
     PayBatchOrm,
     ProductOrm,
     RateHistoryOrm,
+    EmployeeLocationAssignmentOrm,
+    WorkLocationOrm,
     WorkSessionOrm,
 )
 from source.enums import EmployeeRole
@@ -68,6 +70,24 @@ async def upsert_consent_v1(session: AsyncSession, now) -> None:
         session.add(ConsentTextOrm(version=1, content=content, effective_at=now))
 
 
+async def ensure_default_location(session: AsyncSession) -> WorkLocationOrm:
+    row = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.code == "KHO01"))
+    if row:
+        return row
+    row = WorkLocationOrm(
+        code="KHO01",
+        name="Xưởng chính",
+        latitude=Decimal(str(settings.workshop.lat)),
+        longitude=Decimal(str(settings.workshop.lng)),
+        radius_m=settings.workshop.radius_m,
+        coordinate_source="manual_coordinates",
+        is_active=True,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
 async def expire_unused_invites(session: AsyncSession, employee_id: int, now) -> None:
     rows = (await session.scalars(select(InviteCodeOrm).where(
         InviteCodeOrm.employee_id == employee_id,
@@ -100,6 +120,7 @@ async def ensure_employee(
     now,
     hourly_rate: int | None = None,
     created_by: int | None = None,
+    location_id: int | None = None,
 ) -> tuple[EmployeeOrm, str | None]:
     employee = await session.scalar(select(EmployeeOrm).where(EmployeeOrm.code == code))
     if employee:
@@ -124,6 +145,19 @@ async def ensure_employee(
                 effective_from=now.date(),
                 created_by=created_by,
             ))
+    if role == EmployeeRole.employee and location_id is not None:
+        assignment = await session.scalar(select(EmployeeLocationAssignmentOrm).where(
+            EmployeeLocationAssignmentOrm.employee_id == employee.id,
+            EmployeeLocationAssignmentOrm.effective_to.is_(None),
+        ))
+        if not assignment:
+            session.add(EmployeeLocationAssignmentOrm(
+                employee_id=employee.id,
+                location_id=location_id,
+                effective_from=employee.created_at or now,
+                changed_by=created_by,
+                reason="Seed phân công KHO01",
+            ))
     invite = await ensure_invite(session, employee, created_by, now)
     return employee, invite
 
@@ -140,6 +174,7 @@ async def reset_demo_data(session: AsyncSession) -> None:
     # audit_logs.actor_id -> employees (không cascade): xóa nhật ký do nhân viên demo tạo.
     await session.execute(delete(AuditLogOrm).where(AuditLogOrm.actor_id.in_(demo_ids)))
     await session.execute(delete(InviteCodeOrm).where(InviteCodeOrm.employee_id.in_(demo_ids)))
+    await session.execute(delete(EmployeeLocationAssignmentOrm).where(EmployeeLocationAssignmentOrm.employee_id.in_(demo_ids)))
     await session.execute(delete(RateHistoryOrm).where(RateHistoryOrm.employee_id.in_(demo_ids)))
     await session.execute(delete(EmployeeOrm).where(EmployeeOrm.id.in_(demo_ids)))
 
@@ -153,6 +188,7 @@ async def seed_crv(session: AsyncSession, demo: bool = False, reset_demo: bool =
         await reset_demo_data(session)
     await upsert_products(session)
     await upsert_consent_v1(session, now)
+    default_location = await ensure_default_location(session)
     manager, manager_invite = await ensure_employee(
         session,
         "QL001",
@@ -181,6 +217,7 @@ async def seed_crv(session: AsyncSession, demo: bool = False, reset_demo: bool =
                 now,
                 hourly_rate=rate,
                 created_by=manager.id,
+                location_id=default_location.id,
             )
             if link:
                 links.append(f"{code}: {link}")
