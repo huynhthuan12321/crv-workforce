@@ -7,11 +7,23 @@ import {hapticNotify} from "../../../lib/haptic";
 import type {ManagedEmployee, RateHistory} from "../../../types/api";
 import {errorText, useBackButton} from "../shared";
 
+const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
+
+function mockScenario() {
+  if (!USE_MOCK) return "";
+  return new URLSearchParams(window.location.search).get("scenario") ?? "";
+}
+
+function mockKey(...parts: string[]) {
+  return parts.join("_");
+}
+
 export function EmployeesScreen() {
+  const scenario = mockScenario();
   const [rows, setRows] = useState<ManagedEmployee[]>([]);
   const [q, setQ] = useState("");
   const [active, setActive] = useState<"all" | "active" | "locked">("all");
-  const [screen, setScreen] = useState<"list" | "add" | "detail">(new URLSearchParams(window.location.search).get("scenario") === "manager_employee_add" ? "add" : new URLSearchParams(window.location.search).get("scenario") === "manager_employee_detail" ? "detail" : "list");
+  const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
   const [selected, setSelected] = useState<ManagedEmployee | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

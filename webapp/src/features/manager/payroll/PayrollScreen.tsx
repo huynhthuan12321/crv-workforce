@@ -8,6 +8,17 @@ import {hapticNotify} from "../../../lib/haptic";
 import type {CheckoutBounds, PayrollApproveResult, PayrollDetail, PayrollSession, PayrollSummary, WorkSession} from "../../../types/api";
 import {errorText, pendingText, sessionTime, useBackButton} from "../shared";
 
+const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
+
+function mockScenario() {
+  if (!USE_MOCK) return "";
+  return new URLSearchParams(window.location.search).get("scenario") ?? "";
+}
+
+function mockKey(...parts: string[]) {
+  return parts.join("_");
+}
+
 function payrollDone(row: PayrollSummary) {
   return row.paid_amount > 0
     && row.pending_amount === 0
@@ -31,15 +42,15 @@ function comparePayrollRows(a: PayrollSummary, b: PayrollSummary) {
 }
 
 export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: () => void} = {}) {
+  const scenario = mockScenario();
   const [date, setDate] = useState(todayVN());
   const [rows, setRows] = useState<PayrollSummary[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>(
-    new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_confirm" ? [2, 4] : [],
+    scenario === mockKey("manager", "payroll", "confirm") ? [2, 4] : [],
   );
-  const detailScenario = new URLSearchParams(window.location.search).get("scenario");
-  const [detailId, setDetailId] = useState<number | null>(detailScenario === "manager_payroll_a_detail" || detailScenario === "director_payroll_detail" ? 1 : null);
-  const [confirm, setConfirm] = useState(new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_confirm");
-  const [result, setResult] = useState<PayrollApproveResult[] | null>(new URLSearchParams(window.location.search).get("scenario") === "manager_payroll_done" ? [
+  const [detailId, setDetailId] = useState<number | null>(scenario === mockKey("manager", "payroll", "a", "detail") || scenario === mockKey("director", "payroll", "detail") ? 1 : null);
+  const [confirm, setConfirm] = useState(scenario === mockKey("manager", "payroll", "confirm"));
+  const [result, setResult] = useState<PayrollApproveResult[] | null>(scenario === mockKey("manager", "payroll", "done") ? [
     {employee_id: 2, batch_id: 20, batch_no: 1, amount: 224000},
     {employee_id: 4, batch_id: 21, batch_no: 1, amount: 168000},
   ] : null);
@@ -196,20 +207,21 @@ function PayrollResultScreen({result, rows, onBack}: {result: PayrollApproveResu
   );
 }
 function PayrollDetailScreen({employeeId, date, onBack}: {employeeId: number; date: string; onBack: () => void}) {
+  const scenario = mockScenario();
   const [detail, setDetail] = useState<PayrollDetail | null>(null);
-  const [edit, setEdit] = useState<PayrollSession | null>(new URLSearchParams(window.location.search).get("scenario") === "manager_session_edit" ? null : null);
+  const [edit, setEdit] = useState<PayrollSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       const data = await api.get<PayrollDetail>(`/payroll/${employeeId}?date=${date}`);
       setDetail(data);
-      if (new URLSearchParams(window.location.search).get("scenario") === "manager_session_edit") {
+      if (scenario === mockKey("manager", "session", "edit")) {
         setEdit(data.sessions.find((row) => !row.is_locked) ?? data.sessions[0]);
       }
     } catch (err) {
       setError(errorText(err));
     }
-  }, [date, employeeId]);
+  }, [date, employeeId, scenario]);
   useEffect(() => void load(), [load]);
   if (edit) return <EditSessionScreen row={edit} onBack={() => setEdit(null)} onDone={() => { setEdit(null); void load(); }} />;
   if (error) return <ScreenState kind="error" title="Không tải được chi tiết" message={error} onRetry={load} />;

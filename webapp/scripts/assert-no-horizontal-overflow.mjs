@@ -3,7 +3,11 @@ import {baseUrl, chromePath, scenarios} from "./mock-browser.mjs";
 
 if (!chromePath) throw new Error("Không tìm thấy Chrome để kiểm tra overflow.");
 
-const browser = await puppeteer.launch({executablePath: chromePath, headless: true});
+const browser = await puppeteer.launch({
+  executablePath: chromePath,
+  headless: "new",
+  args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+});
 const failures = [];
 
 try {
@@ -13,7 +17,10 @@ try {
       for (const [scenario, tab] of scenarios) {
         const page = await browser.newPage();
         await page.setViewport({width, height: 844, deviceScaleFactor: 1, isMobile: true});
-        await page.goto(`${baseUrl}/?scenario=${scenario}&tab=${tab}&theme=${theme}`, {waitUntil: "networkidle0"});
+        await page.goto(`${baseUrl}/?scenario=${scenario}&tab=${tab}&theme=${theme}`, {waitUntil: "domcontentloaded", timeout: 15000});
+        await page.waitForSelector(".app-shell", {timeout: 10000});
+        await page.waitForFunction(() => document.fonts?.status === "loaded" || !document.fonts, {timeout: 5000}).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 150));
         const result = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,

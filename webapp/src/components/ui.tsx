@@ -71,7 +71,7 @@ export function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) 
   return (
     <label className="search-field">
       <span aria-hidden="true">⌕</span>
-      <input {...props} />
+      <input aria-label={props["aria-label"] || props.placeholder || "Tìm kiếm"} {...props} />
     </label>
   );
 }

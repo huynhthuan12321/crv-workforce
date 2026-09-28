@@ -9,15 +9,38 @@ import {canOpenTelegramLocationSettings, getCurrentLocation, openTelegramLocatio
 import {serverNow, syncServerClock} from "../../lib/server-clock";
 import type {Today, WorkSession} from "../../types/api";
 
+function CheckInIcon({done = false}: {done?: boolean}) {
+  if (done) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.4">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
 function gpsText(session?: WorkSession | null) {
   if (!session) return null;
   if (session.flags.includes("gps_out_of_range")) {
-    return {tone: "warning" as const, text: `Vị trí ngoài xưởng – cần quản lý xem lại · cách ${Math.round(session.check_in_distance_m)} m`};
+    return {tone: "warning" as const, text: `⚠ Ngoài phạm vi xưởng · cách ${Math.round(session.check_in_distance_m)} m. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra.`};
   }
   if (session.flags.includes("gps_low_accuracy")) {
-    return {tone: "warning" as const, text: "Vị trí chưa đủ chính xác – cần quản lý xem lại"};
+    return {tone: "warning" as const, text: "⚠ Độ chính xác vị trí thấp. Vẫn ghi nhận vào ca và gửi quản lý kiểm tra."};
   }
   return {tone: "success" as const, text: `Trong khu vực xưởng (${Math.round(session.check_in_distance_m)} m)`};
+}
+
+function actionErrorMessage(error: ApiError | Error): string {
+  if (!(error instanceof ApiError) && ["LOCATION_DENIED", "LOCATION_UNSUPPORTED"].includes(error.message)) {
+    return "Không lấy được vị trí. Thử lại.";
+  }
+  return error.message;
 }
 
 export function LocatingScreen({onCancel}: {onCancel: () => void}) {
@@ -25,7 +48,7 @@ export function LocatingScreen({onCancel}: {onCancel: () => void}) {
     <Card className="locating-card">
       <div className="radar"><span /></div>
       <h2>Đang lấy vị trí của bạn...</h2>
-      <p>Vui lòng chờ để phát hiện tọa độ vị trí để chấm công.</p>
+      <p>Vui lòng chờ để xác định vị trí của bạn khi chấm công.</p>
       <ul className="note-list">
         <li>Nếu không thấy yêu cầu quyền: iPhone/Android → Vị trí → Cho phép.</li>
         <li>Telegram Desktop có thể không hỗ trợ vị trí chính xác.</li>
@@ -41,6 +64,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [checkInDone, setCheckInDone] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
   const [now, setNow] = useState(() => serverNow());
 
@@ -74,7 +98,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
     }
     setBusy(true);
     setError("");
-    setLocating(true);
+    setCheckInDone(false);
     hapticImpact("medium");
     try {
       const location = await getCurrentLocation();
@@ -82,13 +106,17 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
       const session = await api.post<WorkSession>(`/attendance/${kind}`, location);
       hapticNotify("success");
       if (kind === "check-out") onCheckedOut(session.id);
+      if (kind === "check-in") {
+        setCheckInDone(true);
+        await new Promise((resolve) => window.setTimeout(resolve, 260));
+      }
       await load();
       setConfirmOut(false);
     } catch (e) {
       const err = e as ApiError | Error;
       hapticNotify("error");
       if (err instanceof ApiError && err.code === "LOCATION_CONSENT_REQUIRED") onNeedConsent();
-      else setError(err.message);
+      else setError(actionErrorMessage(err));
     } finally {
       setBusy(false);
       setLocating(false);
@@ -145,15 +173,17 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
   return (
     <div className="screen-stack">
       <Card className={`hero-card ${afterCutoff ? "hero-card--locked" : ""}`}>
-        <div className="hero-card__top">
+        <div className="hero-card__top hero-card__top--status">
           <div>
             <small>Chấm công · Chưa vào ca</small>
-            <h2>{fmtDateLong(now)}</h2>
+            <h2 className="hero-card__date">{fmtDateLong(now)}</h2>
           </div>
-          <Chip tone={afterCutoff ? "warning" : "info"}>{afterCutoff ? "Đã qua giờ" : "Sẵn sàng"}</Chip>
+          <span className={`status-pill ${afterCutoff ? "status-pill--locked" : "status-pill--ready"}`}>
+            <i aria-hidden="true" />
+            {afterCutoff ? "Đã qua giờ" : "Sẵn sàng"}
+          </span>
         </div>
-        {afterCutoff && <div className="clock-illustration clock-illustration--decorative" aria-hidden="true">☾</div>}
-        <h2>{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
+        <h2 className="hero-card__headline">{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
         <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn VÀO CA khi bắt đầu làm việc. Ứng dụng sẽ lấy vị trí của bạn tại thời điểm này."}</p>
         {error && <p className="form-error">{error}</p>}
         <button
@@ -164,14 +194,23 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
           onClick={runAction}
         >
           {busy ? (
-            <span className="round-action__spinner" aria-label="Đang xử lý" />
+            <>
+              <span className="round-action__spinner" aria-hidden="true" />
+              <span>Đang lấy vị trí...</span>
+            </>
+          ) : checkInDone ? (
+            <>
+              <span className="round-action__icon round-action__icon--svg"><CheckInIcon done /></span>
+              <span>ĐÃ VÀO CA</span>
+            </>
           ) : (
             <>
-              <span className="round-action__icon" aria-hidden="true">▶</span>
+              <span className="round-action__icon round-action__icon--svg"><CheckInIcon /></span>
               <span>VÀO CA</span>
             </>
           )}
         </button>
+        {!afterCutoff && <small className="action-hint">Có thể vào ca trước {today.checkin_cutoff}</small>}
       </Card>
     </div>
   );

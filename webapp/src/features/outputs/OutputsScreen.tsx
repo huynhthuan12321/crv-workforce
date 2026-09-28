@@ -136,6 +136,7 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
                     type="number"
                     min="0"
                     max="9999"
+                    aria-label={`Số túi ${item.name}`}
                     disabled={locked}
                     value={item.bags}
                     onChange={(event) => updateBag(item.code, Number(event.target.value || 0))}

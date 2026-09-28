@@ -5,8 +5,23 @@ import {fmtMoney} from "../../lib/format";
 import {periodBounds, periodLabel, shiftPeriod, type ReportPeriod} from "../../lib/report-period";
 import {fmtHours, fmtKg} from "../../lib/report-format";
 import {hapticImpact} from "../../lib/haptic";
+import {todayVN} from "../../lib/date-vn";
 import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries} from "../../types/api";
 import {useBackButton} from "../manager/shared";
+
+function reportMockScenario() {
+  if (!(import.meta.env.DEV && import.meta.env.VITE_MOCK === "1")) return "";
+  return new URLSearchParams(window.location.search).get("scenario") ?? "";
+}
+
+function reportToday() {
+  if (!(import.meta.env.DEV && import.meta.env.VITE_MOCK === "1")) return todayVN();
+  return "2026-09-27";
+}
+
+function mockKey(...parts: string[]) {
+  return parts.join("_");
+}
 
 function ReportChart({rows}: {rows: ReportTimeseries[]}) {
   if (rows.length <= 1) return <p className="muted">Chọn Tuần hoặc Tháng để xem biểu đồ</p>;
@@ -48,12 +63,13 @@ function EmployeePicker({selected, onSelect, onClose}: {selected: ReportEmployee
 }
 
 export function ReportsScreen() {
-  const scenario = new URLSearchParams(window.location.search).get("scenario");
-  const initialPeriod: ReportPeriod = scenario === "director_report_day" ? "day" : scenario === "director_report_month" ? "month" : "week";
+  const scenario = reportMockScenario();
+  const initialPeriod: ReportPeriod = scenario === mockKey("director", "report", "day") ? "day" : scenario === mockKey("director", "report", "month") ? "month" : "week";
+  const today = reportToday();
   const [period, setPeriod] = useState<ReportPeriod>(initialPeriod);
-  const [date, setDate] = useState("2026-09-27");
-  const [employee, setEmployee] = useState<ReportEmployee | null>(new URLSearchParams(window.location.search).get("scenario") === "director_report_filtered" ? {id: 1, code: "NV001", full_name: "Nguyễn Văn A", is_active: true} : null);
-  const [picker, setPicker] = useState(new URLSearchParams(window.location.search).get("scenario") === "director_report_employees");
+  const [date, setDate] = useState(today);
+  const [employee, setEmployee] = useState<ReportEmployee | null>(null);
+  const [picker, setPicker] = useState(scenario === mockKey("director", "report", "employees"));
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [series, setSeries] = useState<ReportTimeseries[]>([]);
   const [products, setProducts] = useState<ProductTotal[]>([]);
@@ -73,6 +89,10 @@ export function ReportsScreen() {
     finally { setLoading(false); }
   }, [date, employee, period]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (scenario !== mockKey("director", "report", "filtered")) return;
+    void api.get<ReportEmployee[]>("/reports/employees").then((rows) => setEmployee(rows[0] ?? null));
+  }, [scenario]);
   useBackButton(picker, () => setPicker(false));
   if (picker) return <EmployeePicker selected={employee} onSelect={setEmployee} onClose={() => setPicker(false)} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải báo cáo" />;
@@ -80,7 +100,7 @@ export function ReportsScreen() {
   if (!summary) return <ScreenState kind="empty" title="Không có dữ liệu" />;
   const total = products.reduce((acc, row) => ({bags: acc.bags + row.bags, kg: acc.kg + row.kg}), {bags: 0, kg: 0});
   const bounds = periodBounds(period, date);
-  const canNext = bounds.to < "2026-09-27";
+  const canNext = bounds.to < today;
   return <div className="screen-stack reports-screen">
     <SectionTitle eyebrow="Báo cáo" title="Tổng quan" />
     <div className="segmented">{(["day", "week", "month"] as const).map((key) => <button key={key} className={period === key ? "active" : ""} onClick={() => { hapticImpact(); setPeriod(key); }}>{key === "day" ? "Ngày" : key === "week" ? "Tuần" : "Tháng"}</button>)}</div>

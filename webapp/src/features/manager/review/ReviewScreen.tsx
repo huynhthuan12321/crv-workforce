@@ -7,10 +7,22 @@ import {hapticImpact, hapticNotify} from "../../../lib/haptic";
 import type {CheckoutBounds, ReviewItem, WorkSession} from "../../../types/api";
 import {errorText, reviewType, sessionTime, useBackButton} from "../shared";
 
+const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
+
+function mockScenario() {
+  if (!USE_MOCK) return "";
+  return new URLSearchParams(window.location.search).get("scenario") ?? "";
+}
+
+function mockKey(...parts: string[]) {
+  return parts.join("_");
+}
+
 export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "gps" | "forgot"} = {}) {
+  const scenario = mockScenario();
   const [filter, setFilter] = useState<"all" | "gps" | "forgot">(initialFilter);
   const [mode, setMode] = useState<"pending" | "resolved">(
-    new URLSearchParams(window.location.search).get("scenario") === "manager_review_resolved" ? "resolved" : "pending",
+    scenario === mockKey("manager", "review", "resolved") ? "resolved" : "pending",
   );
   const [pending, setPending] = useState<ReviewItem[]>([]);
   const [resolved, setResolved] = useState<ReviewItem[]>([]);
@@ -18,7 +30,6 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReviewItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const scenario = new URLSearchParams(window.location.search).get("scenario");
   useBackButton(Boolean(selected), () => setSelected(null));
 
   const load = useCallback(async () => {
@@ -41,7 +52,7 @@ export function ReviewScreen({initialFilter = "all"}: {initialFilter?: "all" | "
   useEffect(() => void load(), [load]);
   useEffect(() => setFilter(initialFilter), [initialFilter]);
   useEffect(() => {
-    if (scenario === "manager_review_close" && !selected) {
+    if (scenario === mockKey("manager", "review", "close") && !selected) {
       const forgot = pending.find((row) => reviewType(row) === "forgot");
       if (forgot) setSelected(forgot);
     }
