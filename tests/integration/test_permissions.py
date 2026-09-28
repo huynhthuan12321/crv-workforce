@@ -176,6 +176,8 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("PUT", f"/api/outputs/{session_id}", {"employee"}, {"items": {"BOT": 1}}),
         ("GET", "/api/employees", {"manager"}, None),
         ("POST", "/api/employees", {"manager"}, {"code": "NVX", "full_name": "Nhan Vien X", "hourly_rate": 30000, "effective_from": str(date.today()), "location_id": location_id}),
+        ("GET", f"/api/employees/{managed_id}", {"manager"}, None),
+        ("GET", f"/api/employees/{managed_id}/location-history", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/lock", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/unlock", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/invite", {"manager"}, None),

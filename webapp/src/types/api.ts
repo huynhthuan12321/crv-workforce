@@ -65,6 +65,8 @@ export type WorkLocation = {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+  current_employee_count?: number;
+  current_employees?: Array<{id: number; code: string; full_name: string}>;
 };
 
 export type Today = {
@@ -252,7 +254,21 @@ export type ManagedEmployee = Employee & {
   is_linked: boolean;
   has_open_session: boolean;
   work_location?: WorkLocation | null;
+  current_location?: {id: number; code: string; name: string; effective_from?: string | null} | null;
   invite_url?: string | null;
+};
+
+export type EmployeeLocationHistory = {
+  id: number;
+  employee_id: number;
+  location_id: number;
+  location_code: string;
+  location_name: string;
+  effective_from: string;
+  effective_to: string | null;
+  changed_by?: number | null;
+  changed_by_name?: string | null;
+  reason?: string | null;
 };
 
 export type RateHistory = {

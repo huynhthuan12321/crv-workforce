@@ -94,6 +94,7 @@ class EmployeeOut(BaseModel):
     is_linked: bool | None = None
     has_open_session: bool | None = None
     work_location: dict | None = None
+    current_location: dict | None = None
 
 
 class WorkLocationOut(BaseModel):
@@ -110,6 +111,8 @@ class WorkLocationOut(BaseModel):
     is_active: bool
     created_at: str
     updated_at: str
+    current_employee_count: int = 0
+    current_employees: list[dict] = []
 
 
 class EmployeeLocationAssignmentOut(BaseModel):
@@ -120,6 +123,8 @@ class EmployeeLocationAssignmentOut(BaseModel):
     location_name: str
     effective_from: str
     effective_to: str | None = None
+    changed_by: int | None = None
+    changed_by_name: str | None = None
     reason: str | None = None
 
 

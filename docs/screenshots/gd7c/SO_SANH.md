@@ -19,12 +19,15 @@
 | Duyệt lương – không có dữ liệu | [light](11_khong_co_du_lieu_light.png) | [dark](11_khong_co_du_lieu_dark.png) | Đạt; trạng thái rỗng không báo lỗi giả. |
 | Nhân viên – danh sách | [light](12_danh_sach_nhan_vien_light.png) | [dark](12_danh_sach_nhan_vien_dark.png) | Đạt; có tìm kiếm, lọc trạng thái, chip chưa liên kết / đang trong ca. |
 | Nhân viên – thêm nhân viên | [light](13_them_nhan_vien_light.png) | [dark](13_them_nhan_vien_dark.png) | Đạt; link mời hiển thị sau khi tạo thành công ở trạng thái thao tác thật. |
-| Nhân viên – chi tiết & đơn giá giờ | [light](14_chi_tiet_don_gia_light.png) | [dark](14_chi_tiet_don_gia_dark.png) | Đạt; có lịch sử đơn giá và ngày hiệu lực. |
-| Nhân viên – khóa khi đang trong ca | [light](15_khoa_dang_trong_ca_light.png) | [dark](15_khoa_dang_trong_ca_dark.png) | Đạt; hiển thị lỗi nghiệp vụ `EMPLOYEE_HAS_OPEN_SESSION`. |
+| Nhân viên – chi tiết, kho chấm công & đơn giá giờ | [light](14_chi_tiet_don_gia_light.png) | [dark](14_chi_tiet_don_gia_dark.png) | Đạt; mục “Kho chấm công” nằm dưới tên, trước đơn giá; có lịch sử kho và lịch sử đơn giá. |
+| Nhân viên – đổi kho | [light](15_doi_kho_light.png) | [dark](15_doi_kho_dark.png) | Đạt; chỉ hiện kho đang dùng khác kho hiện tại, lý do bắt buộc và có cảnh báo áp dụng từ lần vào ca tiếp theo. |
+| Nhân viên – đổi kho khi đang trong ca | [light](16_doi_kho_dang_trong_ca_light.png) | [dark](16_doi_kho_dang_trong_ca_dark.png) | Đạt; hiển thị thêm dòng nhân viên đang trong ca tại kho cũ. |
+| Kho – danh sách điểm làm việc | [light](17_danh_sach_kho_light.png) | [dark](17_danh_sach_kho_dark.png) | Đạt; mỗi kho hiển thị số nhân viên đang phân công và có nút xem danh sách nhân viên. |
+| Nhân viên – khóa khi đang trong ca | [light](18_khoa_dang_trong_ca_light.png) | [dark](18_khoa_dang_trong_ca_dark.png) | Đạt; hiển thị lỗi nghiệp vụ `EMPLOYEE_HAS_OPEN_SESSION`. |
 
 Kiểm tra kỹ thuật:
 
-- `npm run test:overflow`: không tràn ngang ở 360px, 390px và 430px; kiểm cả chữ trong tab bar/chip cho 228 ca mock.
+- `npm run test:overflow`: không tràn ngang ở 360px, 390px và 430px; kiểm cả chữ trong tab bar/chip cho 252 ca mock.
 - Ảnh tối dùng biến theme; không còn nền sáng/chữ tối như lỗi GĐ7b trước đó.
 - Bundle production đã kiểm tra không chứa dữ liệu mock (`Nguyễn Văn A`, `mock-token`, `manager_working`, `QL:`).
 - Ô ngày ở Duyệt lương, Thêm nhân viên và Thêm đơn giá đều có nhãn DD/MM/YYYY theo múi giờ Việt Nam.

@@ -202,7 +202,8 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
             employee = await seed_actor(session, "NV001", EmployeeRole.employee, 1001)
             manager = await seed_actor(session, "QL001", EmployeeRole.manager, 2001)
             await seed_rate(session, employee.id)
-            employee_id, manager_id = employee.id, manager.id
+            location = await session.scalar(select(WorkLocationOrm).where(WorkLocationOrm.code == "KHO01"))
+            employee_id, manager_id, location_id = employee.id, manager.id, location.id
 
     employee_headers = auth_headers(employee_id)
     manager_headers = auth_headers(manager_id)
@@ -281,7 +282,7 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
 
     response = api_client.post(
         "/api/employees",
-        json={"code": "NVHTTP", "full_name": "Nhan vien HTTP", "hourly_rate": 30_000, "effective_from": str(date.today())},
+        json={"code": "NVHTTP", "full_name": "Nhan vien HTTP", "hourly_rate": 30_000, "effective_from": str(date.today()), "location_id": location_id},
         headers=manager_headers,
     )
     assert response.status_code == 200, response.text
@@ -647,6 +648,98 @@ async def test_duplicate_employee_and_rate_return_409_not_500(api_client, pg_fac
     )
     assert duplicate_rate.status_code == 409, duplicate_rate.text
     assert duplicate_rate.json()["code"] == "RATE_DATE_EXISTS"
+
+
+async def test_employee_location_assignment_history_and_required_location(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await seed_actor(session, "QLLOC", EmployeeRole.manager, 8501)
+            director = await seed_actor(session, "GDLOC", EmployeeRole.director, 8502)
+            employee = await seed_actor(session, "NVLOC", EmployeeRole.employee, 8503)
+            inactive = WorkLocationOrm(
+                code="KHOOFF",
+                name="Kho ngung dung",
+                latitude=Decimal("10.1"),
+                longitude=Decimal("106.1"),
+                radius_m=100,
+                coordinate_source="manual_coordinates",
+                is_active=False,
+            )
+            active = WorkLocationOrm(
+                code="KHO02",
+                name="Kho 02",
+                latitude=Decimal("10.2"),
+                longitude=Decimal("106.2"),
+                radius_m=100,
+                coordinate_source="manual_coordinates",
+                is_active=True,
+            )
+            session.add_all([inactive, active])
+            await session.flush()
+            manager_id, director_id, employee_id = manager.id, director.id, employee.id
+            inactive_id, active_id = inactive.id, active.id
+
+    headers = auth_headers(manager_id)
+
+    missing_location = api_client.post(
+        "/api/employees",
+        json={"code": "NVNEW1", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(date.today())},
+        headers=headers,
+    )
+    assert missing_location.status_code == 422
+    assert missing_location.json()["code"] == "LOCATION_REQUIRED"
+
+    inactive_location = api_client.post(
+        "/api/employees",
+        json={"code": "NVNEW2", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(date.today()), "location_id": inactive_id},
+        headers=headers,
+    )
+    assert inactive_location.status_code == 409
+    assert inactive_location.json()["code"] == "LOCATION_INACTIVE"
+
+    listing = api_client.get("/api/employees?q=NVLOC", headers=headers)
+    assert listing.status_code == 200, listing.text
+    managed = listing.json()["data"][0]
+    assert managed["current_location"]["code"] == "KHO01"
+
+    detail = api_client.get(f"/api/employees/{employee_id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["data"]["current_location"]["id"] == managed["current_location"]["id"]
+
+    assigned = api_client.post(
+        f"/api/locations/employees/{employee_id}/assignment",
+        json={"location_id": active_id, "reason": "Doi sang kho 02"},
+        headers=headers,
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["data"]["current_location"]["code"] == "KHO02"
+
+    history = api_client.get(f"/api/employees/{employee_id}/location-history", headers=headers)
+    assert history.status_code == 200, history.text
+    rows = history.json()["data"]
+    assert rows[0]["location_code"] == "KHO02"
+    assert rows[0]["location_name"] == "Kho 02"
+    assert rows[0]["effective_from"].endswith("+07:00")
+    assert rows[0]["effective_to"] is None
+    assert rows[0]["changed_by_name"] == "QLLOC"
+    assert rows[0]["reason"] == "Doi sang kho 02"
+    assert rows[1]["location_code"] == "KHO01"
+    assert rows[1]["effective_to"].endswith("+07:00")
+
+    locations = api_client.get("/api/locations", headers=headers)
+    assert locations.status_code == 200, locations.text
+    kho02 = next(row for row in locations.json()["data"] if row["id"] == active_id)
+    assert kho02["current_employee_count"] == 1
+    assert kho02["current_employees"] == [{"id": employee_id, "code": "NVLOC", "full_name": "NVLOC"}]
+
+    denied_history = api_client.get(f"/api/employees/{employee_id}/location-history", headers=auth_headers(director_id))
+    assert denied_history.status_code == 403
+    denied_assignment = api_client.post(
+        f"/api/locations/employees/{employee_id}/assignment",
+        json={"location_id": active_id, "reason": "Doi kho"},
+        headers=auth_headers(director_id),
+    )
+    assert denied_assignment.status_code == 403
 
 
 async def test_post_patch_bad_or_duplicate_inputs_do_not_return_500(api_client, pg_factory):
