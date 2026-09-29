@@ -1119,10 +1119,27 @@ class HistoryService:
         ).order_by(PayBatchOrm.work_date.desc(), PayBatchOrm.batch_no))).all())
         by_batch = {batch.id: [] for batch in batches}
         unpaid_by_day: dict[date, list[dict]] = {}
+        eligible_by_day: dict[date, set[int]] = {}
+        payroll = PayrollService(self.session, self.clock)
+        for day in {row.work_date for row in sessions}:
+            eligible_by_day[day] = {
+                row.id for row in await payroll.eligible_sessions(employee.id, day)
+            }
         for row in sessions:
+            if row.pay_batch_id:
+                payroll_group = "paid"
+            elif row.status in {SessionStatus.open, SessionStatus.needs_review}:
+                payroll_group = "open_or_review"
+            elif _has_unreviewed_flags(row):
+                payroll_group = "blocked_gps"
+            elif row.status == SessionStatus.closed and row.id in eligible_by_day.get(row.work_date, set()):
+                payroll_group = "pending_eligible"
+            else:
+                payroll_group = "other"
             data = (await session_dict_with_nearby(self.session, row)) | {
                 "pay_batch_id": row.pay_batch_id,
                 "pending_reason": self._pending_reason(row),
+                "payroll_group": payroll_group,
                 "output": await self._output_items(row.id),
             } | await self._output_state(row.id)
             if row.pay_batch_id in by_batch:
@@ -1610,6 +1627,13 @@ class EmployeeService:
             raise fail("EMPLOYEE_HAS_OPEN_SESSION")
         row.is_active = False
         self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_locked", entity_type="employee", entity_id=row.id))
+        if row.telegram_id:
+            self.session.add(_notice(
+                f"account-locked:{row.id}:{int(self.clock.now().timestamp())}",
+                row.telegram_id,
+                "account_locked",
+                {},
+            ))
         return await employee_admin_dict(self.session, row, _vn(self.clock.now()))
 
     async def unlock(self, actor: EmployeeOrm, employee_id: int) -> dict:
@@ -1688,11 +1712,15 @@ class EmployeeService:
         except IntegrityError as exc:
             raise fail("RATE_DATE_EXISTS", 409) from exc
         if mode == "date":
-            payload = {"hourly_rate": hourly_rate, "effective_from": fmt_date_vn(effective_from.date())}
+            payload = {
+                "hourly_rate": hourly_rate,
+                "current_hourly_rate": current_rate,
+                "effective_from": fmt_date_vn(effective_from.date()),
+            }
             key = f"rate-scheduled:{row.id}"
             kind = "rate_scheduled"
         else:
-            payload = {"hourly_rate": hourly_rate}
+            payload = {"hourly_rate": hourly_rate, "old_hourly_rate": current_rate}
             key = f"rate-changed:{row.id}"
             kind = "rate_changed"
         notice = _notice(key, employee.telegram_id, kind, payload)

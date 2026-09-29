@@ -2,7 +2,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import ReplyKeyboardRemove
 from sqlalchemy import select
 
 from source.database.models import EmployeeOrm, NotificationOutboxOrm, PayBatchOrm, SyncOutboxOrm, WorkSessionOrm
@@ -153,7 +154,8 @@ async def test_close_forgotten_and_payroll_notification_texts(session_factory):
 
     async with session_factory() as session:
         notice = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.notification_type == "batch_paid"))
-        assert "Đã duyệt lương đợt 1 ngày 24/04" in notification_text(notice)
+        assert "<b>💰 ĐÃ DUYỆT LƯƠNG</b>" in notification_text(notice)
+        assert "🧾 Đợt: <b>1</b>" in notification_text(notice)
         assert notice.payload["button"]["url"].endswith("tab_history")
 
 
@@ -188,6 +190,55 @@ async def test_process_notifications_403_failed_and_429_stops_batch(session_fact
     await process_notifications(resumed_bot, session_factory, FakeClock(NOW + timedelta(seconds=31)))
     assert len(resumed_bot.sent) >= 1
     workers_module._notifications_paused_until = None
+
+
+async def test_process_notifications_html_parse_falls_back_to_plain_text(session_factory):
+    class ParseThenSuccessBot:
+        def __init__(self):
+            self.calls = []
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.calls.append((chat_id, text, reply_markup))
+            if len(self.calls) == 1:
+                raise TelegramBadRequest(method=None, message="Bad Request: can't parse entities")
+
+    bot = ParseThenSuccessBot()
+    async with session_factory() as session, session.begin():
+        session.add(NotificationOutboxOrm(
+            dedupe_key="html-fallback",
+            chat_id=42,
+            notification_type="rate_changed",
+            payload={"old_hourly_rate": 30000, "hourly_rate": 40000},
+            status=OutboxStatus.pending,
+        ))
+
+    await process_notifications(bot, session_factory, FakeClock(NOW))
+
+    async with session_factory() as session:
+        row = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.dedupe_key == "html-fallback"))
+        assert row.status == OutboxStatus.sent
+        assert row.last_error == "html_parse_fallback"
+    assert len(bot.calls) == 2
+    assert "<b>" in bot.calls[0][1]
+    assert "<b>" not in bot.calls[1][1]
+    assert "<s>" not in bot.calls[1][1]
+    assert bot.calls[1][2] is not None
+
+
+async def test_account_locked_notification_removes_reply_keyboard(session_factory):
+    async with session_factory() as session, session.begin():
+        session.add(NotificationOutboxOrm(
+            dedupe_key="account-locked:1",
+            chat_id=42,
+            notification_type="account_locked",
+            payload={},
+            status=OutboxStatus.pending,
+        ))
+    bot = FakeBot()
+    await process_notifications(bot, session_factory, FakeClock(NOW))
+    assert len(bot.sent) == 1
+    assert bot.sent[0][1] == "Tài khoản đã bị khóa."
+    assert isinstance(bot.sent[0][2], ReplyKeyboardRemove)
 
 
 async def test_process_lark_sends_stable_event_id_and_outbox_id(session_factory, monkeypatch):

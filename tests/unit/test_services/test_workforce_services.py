@@ -872,4 +872,7 @@ async def test_batch_paid_zero_notification_text():
         payload={"batch_no": 2, "date": "2026-04-24", "amount": 0, "paid_total": 162_000},
     )
 
-    assert notification_text(row) == "Đợt 2: 0đ (đã được làm tròn ở đợt trước)"
+    text = notification_text(row)
+    assert "<b>💰 ĐÃ DUYỆT LƯƠNG</b>" in text
+    assert "🧾 Đợt: <b>2</b>" in text
+    assert "(đã được làm tròn ở đợt trước)" in text

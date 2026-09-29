@@ -120,6 +120,7 @@ export type OutputSubmit = {
 export type HistorySession = WorkSession & {
   pay_batch_id: number | null;
   pending_reason: string | null;
+  payroll_group?: "paid" | "pending_eligible" | "blocked_gps" | "open_or_review" | "other" | string | null;
   output_locked?: boolean;
   output_locked_at?: string | null;
   output: ProductTotal[];
