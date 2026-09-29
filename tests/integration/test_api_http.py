@@ -27,6 +27,7 @@ from source.database.models import (
     WorkSessionOrm,
     NotificationOutboxOrm,
     AuditLogOrm,
+    ConversationOrm,
     EmployeeLocationAssignmentOrm,
     WorkLocationOrm,
 )
@@ -842,3 +843,25 @@ async def test_post_patch_bad_or_duplicate_inputs_do_not_return_500(api_client, 
     for method, path, body in cases:
         response = api_client.request(method, path, json=body, headers=headers)
         assert response.status_code < 500, (method, path, response.status_code, response.text)
+
+
+async def test_2_21_director_reads_manager_channel_but_cannot_reply(api_client, pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await seed_actor(session, "NVMSG", EmployeeRole.employee, 8501)
+            director = await seed_actor(session, "GDMSG", EmployeeRole.director, 8502)
+            conversation = ConversationOrm(employee_id=employee.id, channel="manager")
+            session.add(conversation)
+            await session.flush()
+            conversation_id, director_id = conversation.id, director.id
+
+    headers = auth_headers(director_id)
+    read = api_client.get(f"/api/conversations/{conversation_id}/messages", headers=headers)
+    assert read.status_code == 200, read.text
+    reply = api_client.post(
+        f"/api/conversations/{conversation_id}/messages",
+        json={"body": "Không được trả lời kênh quản lý"},
+        headers=headers,
+    )
+    assert reply.status_code == 403
+    assert reply.json()["code"] == "FORBIDDEN"

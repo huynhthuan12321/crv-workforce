@@ -53,6 +53,8 @@ MESSAGES = {
     "LOCATION_INVALID": "Dữ liệu kho không hợp lệ.",
     "LOCATION_CODE_EXISTS": "Mã kho đã tồn tại.",
     "LOCATION_NAME_EXISTS": "Tên kho đã tồn tại.",
+    "FREE_MESSAGE_EXPIRED": "Tin nhắn đã hết hạn.",
+    "RECIPIENT_UNAVAILABLE": "Chưa có người nhận phù hợp.",
 }
 
 

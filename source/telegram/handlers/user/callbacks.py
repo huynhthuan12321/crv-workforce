@@ -7,7 +7,8 @@ from dishka.integrations.aiogram import inject as aiogram_inject
 
 from source.services import UserService
 from source.api.dependencies import session_factory
-from source.database.models import EmployeeOrm, PendingFreeMessageOrm
+from source.database.models import EmployeeOrm
+from source.domain.workforce_errors import WorkforceError
 from source.enums import EmployeeRole
 from source.services.messaging import MessagingService
 from source.telegram.keyboards.webapp import app_tab_url
@@ -39,33 +40,32 @@ async def announcement_ack(callback: CallbackQuery) -> None:
 @user_callbacks_router.callback_query(F.data.startswith("free_target:"))
 async def free_target(callback: CallbackQuery) -> None:
     _, target_role, pending_id = callback.data.split(":", 2)
+    try:
+        pending_pk = int(pending_id)
+    except (TypeError, ValueError):
+        await callback.answer("Tin nhắn đã hết hạn, vui lòng gửi lại.", show_alert=True)
+        return
     async with session_factory() as session, session.begin():
         employee = await session.scalar(select(EmployeeOrm).where(EmployeeOrm.telegram_id == callback.from_user.id))
-        pending = await session.get(PendingFreeMessageOrm, int(pending_id), with_for_update=True)
-        if not employee or not employee.is_active or not pending or pending.employee_id != employee.id:
+        if not employee or not employee.is_active:
             await callback.answer("Tin nhắn đã hết hạn.", show_alert=True)
             return
-        if pending.expires_at < Clock().now():
-            await session.delete(pending)
-            await callback.answer("Tin nhắn đã hết hạn, vui lòng gửi lại.", show_alert=True)
+        if target_role not in {"manager", "director"}:
+            await callback.answer("Người nhận không hợp lệ.", show_alert=True)
             return
         target_enum = EmployeeRole.director if target_role == "director" else EmployeeRole.manager
-        recipients = list((await session.scalars(select(EmployeeOrm).where(
-            EmployeeOrm.role == target_enum,
-            EmployeeOrm.is_active.is_(True),
-            EmployeeOrm.telegram_id.is_not(None),
-        ))).all())
-        if employee.role == EmployeeRole.manager:
-            recipients = [row for row in recipients if row.role == EmployeeRole.director]
-        if not recipients:
-            await callback.answer("Chưa có người nhận phù hợp.", show_alert=True)
-            return
-        for recipient in recipients:
-            await MessagingService(session).send_message(
-                employee, recipient, pending.text,
-                "director" if target_role == "director" else "manager",
+        try:
+            await MessagingService(session, Clock()).send_pending_free_message(
+                employee, pending_pk, target_enum,
             )
-        await session.delete(pending)
+        except WorkforceError as exc:
+            if exc.code == "FREE_MESSAGE_EXPIRED":
+                await callback.answer("Tin nhắn đã hết hạn, vui lòng gửi lại.", show_alert=True)
+                return
+            if exc.code == "RECIPIENT_UNAVAILABLE":
+                await callback.answer("Chưa có người nhận phù hợp.", show_alert=True)
+                return
+            raise
     await callback.answer("Đã gửi.")
     if callback.message:
         await callback.message.edit_text("Đã gửi thành công.")

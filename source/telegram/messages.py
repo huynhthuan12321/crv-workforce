@@ -143,7 +143,10 @@ def announcement(payload: Mapping[str, Any]) -> str:
 def private_message(payload: Mapping[str, Any]) -> str:
     role = payload.get("sender_role")
     label = "Nhân viên" if role == "employee" else ("Giám đốc" if role == "director" else "Quản lý")
-    return f"<b>💬 {label} { _text(payload.get('sender_name') or '') } trả lời</b>\n\n{_text(payload.get('body') or '')}"
+    code = _text(payload.get("sender_code") or "")
+    name = _text(payload.get("sender_name") or "")
+    identity = f"{code} · {name}" if code else name
+    return f"<b>💬 {label} {identity} trả lời</b>\n\n{_text(payload.get('body') or '')}"
 
 
 MESSAGE_BUILDERS = {

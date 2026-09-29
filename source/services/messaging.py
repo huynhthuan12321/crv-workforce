@@ -32,6 +32,12 @@ def _now(clock: Clock | None = None) -> datetime:
     return (clock or Clock()).now()
 
 
+def _as_vn(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=VIETNAM_TZ)
+    return value.astimezone(VIETNAM_TZ)
+
+
 def _channel_for_role(role: EmployeeRole) -> str:
     return CHANNEL_DIRECTOR if role == EmployeeRole.director else CHANNEL_MANAGER
 
@@ -203,12 +209,61 @@ class MessagingService:
                 payload={
                     "message_id": message.id,
                     "sender_id": sender.id,
+                    "sender_code": sender.code,
                     "sender_name": sender.full_name,
                     "sender_role": sender.role.value,
                     "body": body,
                 },
             ))
         return [message]
+
+    async def create_pending_free_message(
+        self,
+        sender: EmployeeOrm,
+        body: str,
+        telegram_message_id: int,
+    ) -> PendingFreeMessageOrm:
+        body = body.strip()
+        if not body or len(body) > MAX_MESSAGE_LENGTH:
+            raise fail("MESSAGE_TOO_LONG" if len(body) > MAX_MESSAGE_LENGTH else "MESSAGE_EMPTY", 422)
+        pending = PendingFreeMessageOrm(
+            employee_id=sender.id,
+            text=body,
+            telegram_message_id=telegram_message_id,
+            expires_at=_now(self.clock) + timedelta(minutes=10),
+        )
+        self.session.add(pending)
+        await self.session.flush()
+        return pending
+
+    async def send_pending_free_message(
+        self,
+        sender: EmployeeOrm,
+        pending_id: int,
+        target_role: EmployeeRole,
+    ) -> int:
+        pending = await self.session.get(PendingFreeMessageOrm, pending_id, with_for_update=True)
+        if not pending or pending.employee_id != sender.id:
+            raise fail("FREE_MESSAGE_EXPIRED", 422)
+        if _as_vn(pending.expires_at) < _now(self.clock):
+            await self.session.delete(pending)
+            raise fail("FREE_MESSAGE_EXPIRED", 422)
+        if target_role not in {EmployeeRole.manager, EmployeeRole.director}:
+            raise fail("RECIPIENT_UNAVAILABLE", 422)
+        if sender.role == EmployeeRole.manager:
+            target_role = EmployeeRole.director
+        recipients = list((await self.session.scalars(select(EmployeeOrm).where(
+            EmployeeOrm.role == target_role,
+            EmployeeOrm.is_active.is_(True),
+            EmployeeOrm.telegram_id.is_not(None),
+        ))).all())
+        if not recipients:
+            raise fail("RECIPIENT_UNAVAILABLE", 422)
+        channel = CHANNEL_DIRECTOR if target_role == EmployeeRole.director else CHANNEL_MANAGER
+        for recipient in recipients:
+            await self.send_message(sender, recipient, pending.text, channel)
+        await self.session.delete(pending)
+        return len(recipients)
 
     async def list_conversations(self, viewer: EmployeeOrm, channel: str) -> list[dict]:
         if viewer.role == EmployeeRole.employee:
