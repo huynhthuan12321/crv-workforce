@@ -314,7 +314,7 @@ GPS nghiệp vụ lưu trong DB. KHÔNG ghi tọa độ vào application log. Ch
 ### 2.18. Lịch sử đơn giá
 
 Trạng thái: **ĐÃ CHỐT – đóng băng trước khi code.** Mọi thay đổi phải sửa `docs/spec/2.18_don_gia.md` trước.
-Liên quan: 2.5 (tính tiền), 2.10 (duyệt lương), 2.11 (quản lý nhân viên), 2.17 (điểm làm việc), 2.19 (khoản điều chỉnh lương – chưa chốt).
+Liên quan: 2.5 (tính tiền), 2.10 (duyệt lương), 2.11 (quản lý nhân viên), 2.17 (điểm làm việc).
 
 #### 2.18.0. Ba quy tắc gốc
 
@@ -322,7 +322,7 @@ Liên quan: 2.5 (tính tiền), 2.10 (duyệt lương), 2.11 (quản lý nhân v
 
 **R-SNAPSHOT – Snapshot phiên.** Khi check-in, hệ thống lấy đơn giá đang có hiệu lực và lưu cố định vào `rate_snapshot`. Mọi thay đổi đơn giá sau đó không ảnh hưởng phiên đang mở hoặc phiên lịch sử.
 
-**R-ADJUST – Điều chỉnh lương.** Sai lệch lương sau khi phiên hoặc đợt thanh toán đã khóa không được sửa ngược dữ liệu gốc. Hệ thống tạo một khoản điều chỉnh lương độc lập, có số tiền cộng/trừ, lý do, người thực hiện và audit, sau đó đưa khoản điều chỉnh vào kỳ thanh toán tiếp theo. *(Chi tiết ở SPEC 2.19 – làm riêng, KHÔNG thuộc phạm vi 2.18.)*
+**R-ADJUST – Không sửa ngược lương.** Phiên và đợt thanh toán đã khóa không được sửa ngược dữ liệu gốc (phiên, đợt, lịch sử đơn giá). Hệ thống KHÔNG có chức năng khoản điều chỉnh lương (đã bỏ SPEC 2.19 – quyết định 29/09/2026); sai lệch sau khi đã duyệt được xử lý ngoài hệ thống.
 
 Hệ quả tính tiền (không đổi so với 2.5): tiền phiên theo `rate_snapshot`; tổng các phiên trong ngày của một nhân viên được cộng trước và làm tròn lên 1.000đ MỘT lần, không tách theo đơn giá hay điểm làm việc.
 
@@ -397,6 +397,4 @@ Ví dụ: 08:00–10:00 @30k = 60.000; 13:00–17:00 @40k = 160.000 → 220.000�
 
 #### 2.18.8. Ngoài phạm vi 2.18
 
-**SPEC 2.19 – Khoản điều chỉnh lương** (chưa chốt, làm sau): bảng `salary_adjustments` (employee_id, amount ±, type, reason, related_session_id, related_batch_id, status, paid_batch_id, created_by, created_at), đưa vào đợt trả kế tiếp, không sửa phiên/đợt/đơn giá gốc.
-
-Còn phải chốt trước khi làm 2.19: (a) khoản âm lớn hơn tiền kỳ này → không tạo đợt âm, chuyển phần âm còn lại sang kỳ sau (`payable_now = max(0, …)`, carry_forward) hay V1 chỉ hỗ trợ khoản cộng; (b) khoản điều chỉnh có làm tròn không và làm tròn cùng hay tách khỏi lương ngày; (c) ai được tạo/duyệt khoản điều chỉnh.
+Khoản điều chỉnh lương (SPEC 2.19 cũ) đã BỎ – không triển khai. Sửa lương phiên đã qua / đợt đã duyệt: không làm trong hệ thống.
