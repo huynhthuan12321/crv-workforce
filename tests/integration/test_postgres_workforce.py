@@ -914,3 +914,73 @@ async def test_2_17_s9_migration_on_data_copy():
         async with admin_engine.begin() as conn:
             await conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
         await admin_engine.dispose()
+
+
+async def test_2_18_s7_migration_preserves_rate_history_and_old_snapshots():
+    """Migration 0006 must preserve every legacy rate row and old session snapshots."""
+    url = os.getenv("TEST_DATABASE_URL")
+    if not url:
+        if os.getenv("CRV_REQUIRE_POSTGRES") == "1":
+            pytest.fail("CRV_REQUIRE_POSTGRES=1 but TEST_DATABASE_URL is not set")
+        pytest.skip("TEST_DATABASE_URL is not set")
+    db_url = make_url(url)
+    db_name = f"crv_mig_218_{uuid.uuid4().hex[:10]}"
+    admin_engine = create_async_engine(db_url.set(database="postgres"), isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        async with admin_engine.begin() as conn:
+            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        _run_alembic_for_db(db_url, db_name, "0003")
+        target_engine = create_async_engine(db_url.set(database=db_name), poolclass=NullPool)
+        try:
+            async with target_engine.begin() as conn:
+                await conn.execute(text(
+                    "INSERT INTO employees (code, full_name, role, is_active) "
+                    "VALUES ('NV218', 'NV 218', 'employee', true), ('QL218', 'QL 218', 'manager', true)"
+                ))
+                employee_id = await conn.scalar(text("SELECT id FROM employees WHERE code='NV218'"))
+                manager_id = await conn.scalar(text("SELECT id FROM employees WHERE code='QL218'"))
+                await conn.execute(text(
+                    "INSERT INTO rate_history (employee_id, hourly_rate, effective_from) "
+                    "VALUES (:employee_id, 30000, '2026-09-27'), (:employee_id, 32000, '2026-09-28')"
+                ), {"employee_id": employee_id})
+                await conn.execute(text("""
+                    INSERT INTO work_sessions (
+                        employee_id, work_date, check_in_at, check_out_at,
+                        check_in_lat, check_in_lng, check_in_accuracy_m, check_in_distance_m,
+                        check_out_lat, check_out_lng, check_out_accuracy_m, check_out_distance_m,
+                        rate_snapshot, minutes, amount_raw, status, flags, version
+                    ) VALUES (
+                        :employee_id, '2026-09-27', '2026-09-27 08:00:00+07', '2026-09-27 09:00:00+07',
+                        10.0, 106.0, 10, 0, 10.0, 106.0, 10, 0,
+                        30000, 60, 30000, 'closed', '[]'::jsonb, 1
+                    )
+                """), {"employee_id": employee_id})
+                before_rates = await conn.scalar(text("SELECT count(*) FROM rate_history WHERE employee_id=:id"), {"id": employee_id})
+                before_snapshot = await conn.scalar(text("SELECT rate_snapshot FROM work_sessions WHERE employee_id=:id"), {"id": employee_id})
+            _run_alembic_for_db(db_url, db_name, "head")
+            async with target_engine.connect() as conn:
+                after_rates = await conn.scalar(text("SELECT count(*) FROM rate_history WHERE employee_id=:id"), {"id": employee_id})
+                after_snapshot = await conn.scalar(text("SELECT rate_snapshot FROM work_sessions WHERE employee_id=:id"), {"id": employee_id})
+                reasons = await conn.scalar(text("SELECT count(*) FROM rate_history WHERE employee_id=:id AND reason='Dữ liệu trước nâng cấp'"), {"id": employee_id})
+            assert before_rates == after_rates == 2
+            assert before_snapshot == after_snapshot == 30000
+            assert reasons == 2
+            subprocess.run(
+                ["alembic", "downgrade", "0003"],
+                check=True,
+                env={
+                    **os.environ,
+                    "APP__ENV": "development", "TG__BOT_TOKEN": "test",
+                    "DB__HOST": db_url.host or "localhost", "DB__PORT": str(db_url.port or 5432),
+                    "DB__USER": db_url.username or "default", "DB__PASSWORD": db_url.password or "password",
+                    "DB__NAME": db_name,
+                },
+                cwd=os.getcwd(), capture_output=True, text=True,
+            )
+            _run_alembic_for_db(db_url, db_name, "head")
+        finally:
+            await target_engine.dispose()
+    finally:
+        async with admin_engine.begin() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+        await admin_engine.dispose()

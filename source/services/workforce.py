@@ -197,6 +197,25 @@ async def pending_rate_row(session: AsyncSession, employee_id: int, now: datetim
     ).order_by(RateHistoryOrm.effective_from.asc()).limit(1))
 
 
+async def pending_rate_rows(session: AsyncSession, employee_id: int, now: datetime | None = None) -> list[RateHistoryOrm]:
+    now = _vn(now or Clock().now())
+    return list((await session.scalars(select(RateHistoryOrm).where(
+        RateHistoryOrm.employee_id == employee_id,
+        RateHistoryOrm.cancelled_at.is_(None),
+        RateHistoryOrm.effective_from > now,
+    ).order_by(RateHistoryOrm.effective_from.asc(), RateHistoryOrm.id.asc()))).all())
+
+
+def rate_summary_payload(row: RateHistoryOrm) -> dict:
+    return {
+        "id": row.id,
+        "hourly_rate": row.hourly_rate,
+        "effective_from": iso_vn(row.effective_from),
+        "reason": row.reason,
+        "is_out_of_range": row.hourly_rate < settings.rules.min_hourly_rate or row.hourly_rate > settings.rules.max_hourly_rate,
+    }
+
+
 async def has_open_session(session: AsyncSession, employee_id: int) -> bool:
     opened = await session.scalar(select(WorkSessionOrm.id).where(
         WorkSessionOrm.employee_id == employee_id,
@@ -242,7 +261,8 @@ async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, at: datet
     location = await current_work_location(session, row.id) if row.role == EmployeeRole.employee else None
     current_location = await current_location_payload(session, row.id) if row.role == EmployeeRole.employee else None
     current_rate = await rate_row_at(session, row.id, now)
-    pending_rate = await pending_rate_row(session, row.id, now)
+    pending_rates = await pending_rate_rows(session, row.id, now)
+    pending_rate = pending_rates[0] if pending_rates else None
     return {
         "id": row.id,
         "code": row.code,
@@ -252,11 +272,8 @@ async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, at: datet
         "is_active": row.is_active,
         "current_hourly_rate": current_rate.hourly_rate if current_rate else None,
         "current_rate_effective_from": iso_vn(current_rate.effective_from) if current_rate else None,
-        "pending_rate": {
-            "id": pending_rate.id,
-            "hourly_rate": pending_rate.hourly_rate,
-            "effective_from": iso_vn(pending_rate.effective_from),
-        } if pending_rate else None,
+        "pending_rate": rate_summary_payload(pending_rate) if pending_rate else None,
+        "pending_rates": [rate_summary_payload(rate) for rate in pending_rates],
         "is_linked": row.telegram_id is not None,
         "has_open_session": await has_open_session(session, row.id),
         "work_location": location_dict(location) if location else None,
@@ -499,18 +516,16 @@ class AttendanceService:
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
         can_check_in = opened is None and now.time() < settings.rules.checkin_cutoff
         location = await current_work_location(self.session, employee.id)
-        pending_rate = await pending_rate_row(self.session, employee.id, now)
+        pending_rates = await pending_rate_rows(self.session, employee.id, now)
+        pending_rate = pending_rates[0] if pending_rates else None
         return {"open_session": await session_dict_with_nearby(self.session, opened) if opened else None,
                 "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0),
                 "server_now": iso_vn(now),
                 "checkin_cutoff": settings.rules.checkin_cutoff.strftime("%H:%M"),
                 "can_check_in": can_check_in,
                 "work_location": location_dict(location) if location else None,
-                "pending_rate": {
-                    "id": pending_rate.id,
-                    "hourly_rate": pending_rate.hourly_rate,
-                    "effective_from": iso_vn(pending_rate.effective_from),
-                } if pending_rate else None}
+                "pending_rate": rate_summary_payload(pending_rate) if pending_rate else None,
+                "pending_rates": [rate_summary_payload(rate) for rate in pending_rates]}
 
 
 class WorkingService:
@@ -1535,6 +1550,7 @@ class EmployeeService:
             "cancel_reason": row.cancel_reason,
             "is_pending": row.cancelled_at is None and _vn(row.effective_from) > now,
             "is_cancelled": row.cancelled_at is not None,
+            "is_out_of_range": row.hourly_rate < settings.rules.min_hourly_rate or row.hourly_rate > settings.rules.max_hourly_rate,
         }
 
     async def list_employees(self, q: str | None = None, active: bool | None = None) -> list[dict]:

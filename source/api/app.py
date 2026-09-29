@@ -9,7 +9,7 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import attendance, consent, employees, history, locations, outputs, payroll, reports, review, working
+from source.api.routes import attendance, client_errors, consent, employees, history, locations, outputs, payroll, reports, review, working
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
@@ -107,6 +107,7 @@ def setup_api(app: FastAPI) -> None:
 
     app.include_router(health.router, prefix=API_PREFIX, tags=["Health"])
     app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["Auth"])
+    app.include_router(client_errors.router, prefix=f"{API_PREFIX}/client-errors", tags=["Client errors"])
     app.include_router(consent.router, prefix=f"{API_PREFIX}/consent", tags=["Consent"])
     app.include_router(attendance.router, prefix=f"{API_PREFIX}/attendance", tags=["Attendance"])
     app.include_router(outputs.router, prefix=f"{API_PREFIX}/outputs", tags=["Outputs"])
