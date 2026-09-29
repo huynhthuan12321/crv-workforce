@@ -2,7 +2,7 @@ import os
 import asyncio
 import subprocess
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -20,6 +20,7 @@ from source.database.models import (
     EmployeeLocationAssignmentOrm,
     EmployeeOrm,
     LocationConsentOrm,
+    NotificationOutboxOrm,
     PayBatchOrm,
     RateHistoryOrm,
     ProductOrm,
@@ -29,8 +30,9 @@ from source.database.models import (
 )
 from source.domain.workforce_errors import WorkforceError
 from source.enums import EmployeeRole, SessionStatus
-from source.services.workforce import AttendanceService, PayrollService, ReportService, ReviewService, WorkLocationService
+from source.services.workforce import AttendanceService, EmployeeService, PayrollService, ReportService, ReviewService, WorkLocationService, rate_row_at
 from source.utils.clock import FakeClock, VIETNAM_TZ
+from source.workers import notification_text
 
 
 pytestmark = pytest.mark.postgres
@@ -305,7 +307,7 @@ async def test_bot_advisory_lock_autocommit_idle(pg_factory):
 
 
 async def add_rate_and_consent(session, employee: EmployeeOrm):
-    session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=date(2026, 4, 1)))
+    session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=dt(0), reason="test rate"))
     text_row = await session.get(ConsentTextOrm, 1)
     if not text_row:
         text_row = ConsentTextOrm(version=1, content="consent", effective_at=dt(6))
@@ -313,6 +315,216 @@ async def add_rate_and_consent(session, employee: EmployeeOrm):
         await session.flush()
     session.add(LocationConsentOrm(employee_id=employee.id, consent_version=1, consented_at=dt(6)))
     await session.flush()
+
+
+async def test_2_18_s3_checkin_uses_rate_at_timestamp_and_snapshot_is_immutable(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            await add_rate_and_consent(session, employee)
+            manager_id, employee_id = manager.id, employee.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await session.get(EmployeeOrm, employee_id)
+            opened = await AttendanceService(session, FakeClock(dt(8))).check_in(employee, 10, 106, 10)
+            assert opened.rate_snapshot == 30_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            changed = await EmployeeService(session, FakeClock(dt(9))).add_rate(
+                manager, employee_id, 40_000, mode="next_shift", reason="Tăng theo năng lực",
+            )
+            assert changed["hourly_rate"] == 40_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await session.get(EmployeeOrm, employee_id)
+            closed = await AttendanceService(session, FakeClock(dt(10))).check_out(employee, 10, 106, 10)
+            assert closed.rate_snapshot == 30_000
+            assert int(closed.amount_raw) == 60_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await session.get(EmployeeOrm, employee_id)
+            opened = await AttendanceService(session, FakeClock(dt(11))).check_in(employee, 10, 106, 10)
+            assert opened.rate_snapshot == 40_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            preview = await EmployeeService(session, FakeClock(dt(12))).add_rate(
+                manager, employee_id, 15_000, mode="next_shift", reason="Điều chỉnh nhiệm vụ",
+            )
+            assert preview["requires_confirmation"] is True
+            changed = await EmployeeService(session, FakeClock(dt(12))).add_rate(
+                manager, employee_id, 15_000, mode="next_shift", reason="Điều chỉnh nhiệm vụ", confirm_large_change=True,
+            )
+            assert changed["hourly_rate"] == 15_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            employee = await session.get(EmployeeOrm, employee_id)
+            closed = await AttendanceService(session, FakeClock(dt(13))).check_out(employee, 10, 106, 10)
+            assert closed.rate_snapshot == 40_000
+
+
+async def test_2_18_s3_edit_and_close_forgotten_do_not_change_rate_snapshot(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            await add_rate_and_consent(session, employee)
+            row = session_row(employee.id, SessionStatus.needs_review, check_in=dt(8))
+            row.rate_snapshot = 30_000
+            row.review_reason = "forgot_checkout"
+            session.add(row)
+            await session.flush()
+            manager_id, employee_id, session_id = manager.id, employee.id, row.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            await EmployeeService(session, FakeClock(dt(9))).add_rate(
+                manager, employee_id, 40_000, mode="next_shift", reason="Tăng theo năng lực",
+            )
+            closed = await ReviewService(session, FakeClock(dt(10))).close_forgotten(manager, session_id, dt(9), "bổ sung giờ ra")
+            assert closed.rate_snapshot == 30_000
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            edited = await ReviewService(session, FakeClock(dt(11))).edit_session(manager, session_id, dt(8), dt(9, 30), "sửa theo sổ")
+            assert edited.rate_snapshot == 30_000
+
+
+async def test_2_18_s4_multiple_rates_one_day_round_once_with_locations(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            kho2 = await make_location(session, "KHO02", "Kho 02", lng=Decimal("106.0100000"))
+            session.add(session_row(employee.id, SessionStatus.closed, check_in=dt(8), check_out=dt(10)))
+            row2 = session_row(employee.id, SessionStatus.closed, check_in=dt(13), check_out=dt(17))
+            row2.rate_snapshot = 40_000
+            row2.amount_raw = Decimal(240) * Decimal(40_000) / Decimal(60)
+            row2.work_location_id = kho2.id
+            row2.location_code_snapshot = kho2.code
+            row2.location_name_snapshot = kho2.name
+            session.add(row2)
+            manager_id, employee_id = manager.id, employee.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            summary = (await PayrollService(session).list_payroll(date(2026, 4, 24)))[0]
+            assert summary["rate_snapshots"] == [30_000, 40_000]
+            assert summary["day_total_rounded"] == 220_000
+            manager = await session.get(EmployeeOrm, manager_id)
+            batch = await PayrollService(session).approve_one(manager, employee_id, date(2026, 4, 24))
+            assert batch.amount == 220_000
+
+
+async def test_2_18_s2_schedule_cancel_pending_and_rate_bounds(pg_factory, monkeypatch):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=datetime(2026, 10, 1, 0, 0, tzinfo=VIETNAM_TZ), reason="test rate"))
+            manager_id, employee_id = manager.id, employee.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            scheduled = await EmployeeService(session, FakeClock(datetime(2026, 10, 31, 10, 0, tzinfo=VIETNAM_TZ))).add_rate(
+                manager, employee_id, 40_000, mode="date", effective_date=date(2026, 11, 1), reason="Thay đổi công việc",
+            )
+            assert scheduled["is_pending"] is True
+            before = await rate_row_at(session, employee_id, datetime(2026, 10, 31, 23, 0, tzinfo=VIETNAM_TZ))
+            after = await rate_row_at(session, employee_id, datetime(2026, 11, 1, 0, 5, tzinfo=VIETNAM_TZ))
+            assert before.hourly_rate == 30_000
+            assert after.hourly_rate == 40_000
+
+            with pytest.raises(WorkforceError) as exc:
+                await EmployeeService(session, FakeClock(datetime(2026, 10, 31, 10, 5, tzinfo=VIETNAM_TZ))).add_rate(
+                    manager, employee_id, 45_000, mode="date", effective_date=date(2026, 11, 2), reason="Thay đổi công việc",
+                )
+            assert exc.value.code == "RATE_PENDING_EXISTS"
+
+            cancelled = await EmployeeService(session, FakeClock(datetime(2026, 10, 31, 10, 10, tzinfo=VIETNAM_TZ))).cancel_rate(
+                manager, employee_id, scheduled["id"], "Hủy theo yêu cầu",
+            )
+            assert cancelled["is_cancelled"] is True
+            after_cancel = await rate_row_at(session, employee_id, datetime(2026, 11, 1, 0, 5, tzinfo=VIETNAM_TZ))
+            assert after_cancel.hourly_rate == 30_000
+
+            rescheduled = await EmployeeService(session, FakeClock(datetime(2026, 10, 31, 10, 15, tzinfo=VIETNAM_TZ))).add_rate(
+                manager, employee_id, 45_000, mode="date", effective_date=date(2026, 11, 2), reason="Thay đổi công việc",
+            )
+            assert rescheduled["hourly_rate"] == 45_000
+
+            with pytest.raises(WorkforceError) as exc:
+                await EmployeeService(session, FakeClock(datetime(2026, 11, 3, 10, 0, tzinfo=VIETNAM_TZ))).cancel_rate(
+                    manager, employee_id, rescheduled["id"], "Hủy theo yêu cầu",
+                )
+            assert exc.value.code == "RATE_ALREADY_EFFECTIVE"
+
+            with pytest.raises(WorkforceError) as exc:
+                await EmployeeService(session, FakeClock(datetime(2026, 10, 31, 10, 20, tzinfo=VIETNAM_TZ))).add_rate(
+                    manager, employee_id, 999, mode="next_shift", reason="Điều chỉnh tạm thời",
+                )
+            assert exc.value.code == "RATE_OUT_OF_RANGE"
+
+
+async def test_2_18_s2_immediate_change_keeps_future_pending(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=datetime(2026, 10, 1, 0, 0, tzinfo=VIETNAM_TZ), reason="test rate"))
+            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=40_000, effective_from=datetime(2026, 11, 1, 0, 0, tzinfo=VIETNAM_TZ), reason="pending rate"))
+            manager_id, employee_id = manager.id, employee.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            immediate = await EmployeeService(session, FakeClock(datetime(2026, 10, 20, 9, 0, tzinfo=VIETNAM_TZ))).add_rate(
+                manager, employee_id, 35_000, mode="next_shift", reason="Điều chỉnh nhiệm vụ",
+            )
+            assert immediate["hourly_rate"] == 35_000
+            today = await rate_row_at(session, employee_id, datetime(2026, 10, 20, 9, 1, tzinfo=VIETNAM_TZ))
+            future = await rate_row_at(session, employee_id, datetime(2026, 11, 1, 0, 5, tzinfo=VIETNAM_TZ))
+            assert today.hourly_rate == 35_000
+            assert future.hourly_rate == 40_000
+
+
+async def test_2_18_s6_rate_change_notifications_dedupe_and_text(pg_factory):
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await make_employee(session, "QL001", EmployeeRole.manager)
+            employee = await make_employee(session)
+            employee.telegram_id = 1001
+            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=dt(0), reason="test rate"))
+            manager_id, employee_id = manager.id, employee.id
+
+    async with pg_factory() as session:
+        async with session.begin():
+            manager = await session.get(EmployeeOrm, manager_id)
+            changed = await EmployeeService(session, FakeClock(dt(9))).add_rate(manager, employee_id, 40_000, mode="next_shift", reason="Tăng theo năng lực")
+            scheduled = await EmployeeService(session, FakeClock(dt(9, 5))).add_rate(manager, employee_id, 45_000, mode="date", effective_date=date(2026, 4, 25), reason="Thay đổi công việc")
+            cancelled = await EmployeeService(session, FakeClock(dt(9, 10))).cancel_rate(manager, employee_id, scheduled["id"], "Hủy theo yêu cầu")
+            assert changed["id"] and cancelled["is_cancelled"]
+
+    async with pg_factory() as session:
+        rows = (await session.scalars(select(NotificationOutboxOrm).order_by(NotificationOutboxOrm.dedupe_key))).all()
+        keys = [row.dedupe_key for row in rows]
+        assert len(keys) == len(set(keys))
+        texts = [notification_text(row) for row in rows]
+        assert any("Đơn giá của bạn đã được cập nhật" in text for text in texts)
+        assert any("Đơn giá của bạn sẽ được cập nhật" in text for text in texts)
+        assert any("đã được hủy" in text for text in texts)
+        assert all("Tăng theo năng lực" not in text and "Thay đổi công việc" not in text for text in texts)
 
 
 async def test_2_17_s2_assignments_history_unique_overlap_and_inactive_blocked(pg_factory):

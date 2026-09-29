@@ -114,7 +114,7 @@ async def permission_context(pg_factory, permission_client):
             for row_employee in [employee, managed]:
                 session.add(EmployeeLocationAssignmentOrm(employee_id=row_employee.id, location_id=location.id,
                                                          effective_from=NOW, reason="test"))
-            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=date.today()))
+            session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=NOW, reason="test rate"))
             product = ProductOrm(code="BOT", name="Bột", kg_per_bag=Decimal("1.20"), sort_order=1)
             session.add(product)
             row = WorkSessionOrm(
@@ -175,14 +175,15 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("GET", f"/api/outputs/{session_id}", {"employee"}, None),
         ("PUT", f"/api/outputs/{session_id}", {"employee"}, {"items": {"BOT": 1}}),
         ("GET", "/api/employees", {"manager"}, None),
-        ("POST", "/api/employees", {"manager"}, {"code": "NVX", "full_name": "Nhan Vien X", "hourly_rate": 30000, "effective_from": str(date.today()), "location_id": location_id}),
+        ("POST", "/api/employees", {"manager"}, {"code": "NVX", "full_name": "Nhan Vien X", "hourly_rate": 30000, "effective_from": str(NOW.date()), "location_id": location_id}),
         ("GET", f"/api/employees/{managed_id}", {"manager"}, None),
         ("GET", f"/api/employees/{managed_id}/location-history", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/lock", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/unlock", {"manager"}, None),
         ("POST", f"/api/employees/{managed_id}/invite", {"manager"}, None),
         ("GET", f"/api/employees/{managed_id}/rates", {"manager"}, None),
-        ("POST", f"/api/employees/{managed_id}/rates", {"manager"}, {"hourly_rate": 31000, "effective_from": str(date.today() + timedelta(days=1))}),
+        ("POST", f"/api/employees/{managed_id}/rates", {"manager"}, {"hourly_rate": 31000, "mode": "date", "effective_date": str(NOW.date() + timedelta(days=1)), "reason": "Thay đổi công việc"}),
+        ("POST", f"/api/employees/{managed_id}/rates/1/cancel", {"manager"}, {"reason": "Hủy theo yêu cầu"}),
         ("GET", "/api/working-now", {"manager"}, None),
         ("GET", "/api/locations", {"manager", "director"}, None),
         ("POST", "/api/locations", {"manager", "director"}, {"code": "KHOX", "name": "Kho X", "latitude": 10.1, "longitude": 106.1, "radius_m": 100, "coordinate_source": "manual_coordinates"}),
@@ -248,5 +249,6 @@ async def test_permission_table_covers_all_api_routes(permission_context):
                               .replace("111", "{employee_id}")
                               .replace("114", "{employee_id}")
                               .replace("222", "{session_id}")
-                              .replace("333", "{location_id}")))
+                                  .replace("333", "{location_id}")
+                                  .replace("/rates/1/cancel", "/rates/{rate_id}/cancel")))
     assert actual == table_normalized

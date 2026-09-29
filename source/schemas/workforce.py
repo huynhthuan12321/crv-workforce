@@ -84,6 +84,7 @@ class TodayOut(BaseModel):
     checkin_cutoff: str
     can_check_in: bool
     work_location: dict | None = None
+    pending_rate: dict | None = None
 
 
 class EmployeeOut(BaseModel):
@@ -94,6 +95,8 @@ class EmployeeOut(BaseModel):
     telegram_id: int | None = None
     is_active: bool | None = None
     current_hourly_rate: int | None = None
+    current_rate_effective_from: str | None = None
+    pending_rate: dict | None = None
     is_linked: bool | None = None
     has_open_session: bool | None = None
     work_location: dict | None = None
@@ -177,6 +180,8 @@ class PayrollSummaryOut(BaseModel):
     can_approve: bool
     unreviewed_flag_session_ids: list[int]
     hourly_rate: int | None = None
+    rate_snapshots: list[int] = []
+    rate_count: int = 0
     has_open_session: bool = False
     has_sessions: bool = False
     needs_review_session_ids: list[int] = []

@@ -60,13 +60,21 @@ class InviteCodeOrm(Base):
 
 class RateHistoryOrm(Base):
     __tablename__ = "rate_history"
-    __table_args__ = (UniqueConstraint("employee_id", "effective_from"), CheckConstraint("hourly_rate > 0"))
+    __table_args__ = (
+        Index("uq_rate_history_employee_effective_active", "employee_id", "effective_from", unique=True,
+              postgresql_where=text("cancelled_at IS NULL"), sqlite_where=text("cancelled_at IS NULL")),
+        CheckConstraint("hourly_rate > 0"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
     hourly_rate: Mapped[int] = mapped_column(Integer)
-    effective_from: Mapped[date] = mapped_column(Date)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(Text, default="Dữ liệu trước nâng cấp")
     created_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class ProductOrm(Base):

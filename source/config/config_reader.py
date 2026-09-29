@@ -89,6 +89,8 @@ class RuleSettings(NestedSettings):
     output_edit_minutes: int = 10
     pay_round_unit: int = 1000
     invite_expire_days: int = 7
+    min_hourly_rate: int = 1_000
+    max_hourly_rate: int = 1_000_000
 
 
 class LarkSettings(NestedSettings):

@@ -55,11 +55,27 @@ $env:DB__NAME = "crv_workforce_migcheck"
 $migration = Run-Capture "alembic migration check" "alembic upgrade head; alembic downgrade 0002; alembic upgrade head; alembic check"
 
 Push-Location webapp
+$devProcess = $null
 try {
     $npmTest = Run-Capture "npm test" "npm test"
     $npmBuild = Run-Capture "npm run build" "npm run build"
+    $env:VITE_MOCK = "1"
+    $env:CRV_MOCK_URL = "http://127.0.0.1:4175"
+    $devCommand = "Set-Location '$((Get-Location).Path)'; `$env:VITE_MOCK='1'; npm run dev -- --host 127.0.0.1 --port 4175"
+    $devProcess = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $devCommand -PassThru -WindowStyle Hidden
+    for ($i = 0; $i -lt 30; $i++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:4175" | Out-Null
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
     $overflow = Run-Capture "npm run test:overflow" "npm run test:overflow"
 } finally {
+    if ($devProcess -and -not $devProcess.HasExited) {
+        Stop-Process -Id $devProcess.Id -Force
+    }
     Pop-Location
 }
 

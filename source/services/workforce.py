@@ -1,7 +1,7 @@
 import math
 import secrets
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_CEILING
 
 from sqlalchemy import and_, delete, func, or_, select
@@ -174,12 +174,27 @@ async def create_invite(session: AsyncSession, employee: EmployeeOrm, actor_id: 
     return invite_url(code_value)
 
 
-async def current_hourly_rate(session: AsyncSession, employee_id: int, day: date | None = None) -> int | None:
-    day = day or _vn(Clock().now()).date()
-    return await session.scalar(select(RateHistoryOrm.hourly_rate).where(
+async def rate_row_at(session: AsyncSession, employee_id: int, at: datetime | None = None) -> RateHistoryOrm | None:
+    at = _vn(at or Clock().now())
+    return await session.scalar(select(RateHistoryOrm).where(
         RateHistoryOrm.employee_id == employee_id,
-        RateHistoryOrm.effective_from <= day,
+        RateHistoryOrm.cancelled_at.is_(None),
+        RateHistoryOrm.effective_from <= at,
     ).order_by(RateHistoryOrm.effective_from.desc()).limit(1))
+
+
+async def current_hourly_rate(session: AsyncSession, employee_id: int, at: datetime | None = None) -> int | None:
+    row = await rate_row_at(session, employee_id, at)
+    return row.hourly_rate if row else None
+
+
+async def pending_rate_row(session: AsyncSession, employee_id: int, now: datetime | None = None) -> RateHistoryOrm | None:
+    now = _vn(now or Clock().now())
+    return await session.scalar(select(RateHistoryOrm).where(
+        RateHistoryOrm.employee_id == employee_id,
+        RateHistoryOrm.cancelled_at.is_(None),
+        RateHistoryOrm.effective_from > now,
+    ).order_by(RateHistoryOrm.effective_from.asc()).limit(1))
 
 
 async def has_open_session(session: AsyncSession, employee_id: int) -> bool:
@@ -222,9 +237,12 @@ async def current_location_payload(session: AsyncSession, employee_id: int) -> d
     }
 
 
-async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date | None = None) -> dict:
+async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, at: datetime | None = None) -> dict:
+    now = _vn(at or Clock().now())
     location = await current_work_location(session, row.id) if row.role == EmployeeRole.employee else None
     current_location = await current_location_payload(session, row.id) if row.role == EmployeeRole.employee else None
+    current_rate = await rate_row_at(session, row.id, now)
+    pending_rate = await pending_rate_row(session, row.id, now)
     return {
         "id": row.id,
         "code": row.code,
@@ -232,7 +250,13 @@ async def employee_admin_dict(session: AsyncSession, row: EmployeeOrm, day: date
         "role": row.role.value,
         "telegram_id": row.telegram_id,
         "is_active": row.is_active,
-        "current_hourly_rate": await current_hourly_rate(session, row.id, day),
+        "current_hourly_rate": current_rate.hourly_rate if current_rate else None,
+        "current_rate_effective_from": iso_vn(current_rate.effective_from) if current_rate else None,
+        "pending_rate": {
+            "id": pending_rate.id,
+            "hourly_rate": pending_rate.hourly_rate,
+            "effective_from": iso_vn(pending_rate.effective_from),
+        } if pending_rate else None,
         "is_linked": row.telegram_id is not None,
         "has_open_session": await has_open_session(session, row.id),
         "work_location": location_dict(location) if location else None,
@@ -365,11 +389,8 @@ class AttendanceService:
         self.session = session
         self.clock = clock or Clock()
 
-    async def _rate(self, employee_id: int, day: date) -> int:
-        rate = await self.session.scalar(select(RateHistoryOrm.hourly_rate).where(
-            RateHistoryOrm.employee_id == employee_id,
-            RateHistoryOrm.effective_from <= day,
-        ).order_by(RateHistoryOrm.effective_from.desc()).limit(1))
+    async def _rate_at(self, employee_id: int, at: datetime) -> int:
+        rate = await current_hourly_rate(self.session, employee_id, at)
         if rate is None:
             raise fail("NO_RATE")
         return rate
@@ -427,7 +448,7 @@ class AttendanceService:
             location_radius_m_snapshot=location.radius_m,
             nearby_location_id=nearby_id,
             nearby_location_distance_m=nearby_distance,
-            rate_snapshot=await self._rate(employee.id, now.date()),
+            rate_snapshot=await self._rate_at(employee.id, now),
             status=SessionStatus.open, flags=_flags(distance, accuracy_m, location.radius_m),
         )
         row.flag_source = _flag_source(row)
@@ -478,12 +499,18 @@ class AttendanceService:
             PayBatchOrm.employee_id == employee.id, PayBatchOrm.work_date == now.date()))
         can_check_in = opened is None and now.time() < settings.rules.checkin_cutoff
         location = await current_work_location(self.session, employee.id)
+        pending_rate = await pending_rate_row(self.session, employee.id, now)
         return {"open_session": await session_dict_with_nearby(self.session, opened) if opened else None,
                 "estimated_day_amount": ceil_money(raw), "paid_today": int(paid or 0),
                 "server_now": iso_vn(now),
                 "checkin_cutoff": settings.rules.checkin_cutoff.strftime("%H:%M"),
                 "can_check_in": can_check_in,
-                "work_location": location_dict(location) if location else None}
+                "work_location": location_dict(location) if location else None,
+                "pending_rate": {
+                    "id": pending_rate.id,
+                    "hourly_rate": pending_rate.hourly_rate,
+                    "effective_from": iso_vn(pending_rate.effective_from),
+                } if pending_rate else None}
 
 
 class WorkingService:
@@ -900,12 +927,15 @@ class PayrollService:
         if has_open:
             pending_reasons.append("open_session")
         blocked_amount = await self._blocked_amount(employee.id, day, paid, pending_amount)
+        rate_snapshots = sorted({int(row.rate_snapshot) for row in all_sessions if row.rate_snapshot is not None})
         return {
             "employee_id": employee.id,
             "code": employee.code,
             "full_name": employee.full_name,
             "work_date": str(day),
-            "hourly_rate": await current_hourly_rate(self.session, employee.id, day),
+            "hourly_rate": rate_snapshots[0] if len(rate_snapshots) == 1 else None,
+            "rate_snapshots": rate_snapshots,
+            "rate_count": len(rate_snapshots),
             "closed_minutes": sum((row.minutes or 0) for row in all_sessions if row.status == SessionStatus.closed),
             "eligible_minutes": sum((row.minutes or 0) for row in eligible),
             "eligible_session_ids": [row.id for row in eligible],
@@ -1448,7 +1478,7 @@ class WorkLocationService:
             raise fail("LOCATION_INACTIVE")
         now = _vn(self.clock.now())
         if current and current.location_id == location_id:
-            return await employee_admin_dict(self.session, employee, now.date())
+            return await employee_admin_dict(self.session, employee, now)
         old_value = {"location_id": current.location_id if current else None}
         if current:
             current.effective_to = now
@@ -1458,12 +1488,54 @@ class WorkLocationService:
                                      entity_type="employee", entity_id=employee_id,
                                      old_value=old_value, new_value={"location_id": location_id}, reason=reason))
         await self.session.flush()
-        return await employee_admin_dict(self.session, employee, now.date())
+        return await employee_admin_dict(self.session, employee, now)
 
 
 class EmployeeService:
     def __init__(self, session: AsyncSession, clock: Clock | None = None):
         self.session, self.clock = session, clock or Clock()
+
+    def _validate_rate_reason(self, reason: str | None) -> str:
+        value = (reason or "").strip()
+        if not (5 <= len(value) <= 200):
+            raise fail("REASON_REQUIRED", 422)
+        return value
+
+    def _validate_hourly_rate(self, hourly_rate: int) -> None:
+        if hourly_rate < settings.rules.min_hourly_rate or hourly_rate > settings.rules.max_hourly_rate:
+            raise fail("RATE_OUT_OF_RANGE", 422, {
+                "min": settings.rules.min_hourly_rate,
+                "max": settings.rules.max_hourly_rate,
+            })
+
+    def _effective_from(self, mode: str, effective_date: date | None = None) -> datetime:
+        now = _vn(self.clock.now())
+        if mode == "next_shift":
+            return now
+        if mode == "date":
+            if effective_date is None:
+                raise fail("RATE_IN_PAST", 422)
+            tomorrow = now.date() + timedelta(days=1)
+            if effective_date < tomorrow:
+                raise fail("RATE_IN_PAST", 422)
+            return datetime.combine(effective_date, time(0, 0), tzinfo=VIETNAM_TZ)
+        raise fail("INVALID_EMPLOYEE_DATA", 422)
+
+    def _rate_payload(self, row: RateHistoryOrm, now: datetime | None = None) -> dict:
+        now = _vn(now or self.clock.now())
+        return {
+            "id": row.id,
+            "hourly_rate": row.hourly_rate,
+            "effective_from": iso_vn(row.effective_from),
+            "reason": row.reason,
+            "created_by": row.created_by,
+            "created_at": iso_vn(row.created_at),
+            "cancelled_at": iso_vn(row.cancelled_at) if row.cancelled_at else None,
+            "cancelled_by": row.cancelled_by,
+            "cancel_reason": row.cancel_reason,
+            "is_pending": row.cancelled_at is None and _vn(row.effective_from) > now,
+            "is_cancelled": row.cancelled_at is not None,
+        }
 
     async def list_employees(self, q: str | None = None, active: bool | None = None) -> list[dict]:
         query = select(EmployeeOrm).where(EmployeeOrm.role == EmployeeRole.employee)
@@ -1473,13 +1545,13 @@ class EmployeeService:
             like = f"%{q.strip()}%"
             query = query.where(or_(EmployeeOrm.code.ilike(like), EmployeeOrm.full_name.ilike(like)))
         rows = (await self.session.scalars(query.order_by(EmployeeOrm.code))).all()
-        return [await employee_admin_dict(self.session, row, _vn(self.clock.now()).date()) for row in rows]
+        return [await employee_admin_dict(self.session, row, _vn(self.clock.now())) for row in rows]
 
     async def get(self, employee_id: int) -> dict:
         row = await self.session.get(EmployeeOrm, employee_id)
         if not row or row.role != EmployeeRole.employee:
             raise fail("EMPLOYEE_NOT_FOUND", 404)
-        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()))
 
     async def location_history(self, employee_id: int) -> list[dict]:
         employee = await self.session.get(EmployeeOrm, employee_id)
@@ -1505,9 +1577,11 @@ class EmployeeService:
             "reason": assignment.reason,
         } for assignment, location, actor in rows]
 
-    async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int, effective_from: date, location_id: int) -> dict:
-        employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, location_id, self.clock)
-        data = await employee_admin_dict(self.session, employee, effective_from)
+    async def create(self, actor: EmployeeOrm, code: str, name: str, hourly_rate: int,
+                     effective_from: date | None, location_id: int, reason: str | None = None) -> dict:
+        self._validate_hourly_rate(hourly_rate)
+        employee, invite = await create_employee(self.session, actor, code, name, hourly_rate, effective_from, location_id, self.clock, reason)
+        data = await employee_admin_dict(self.session, employee, _vn(self.clock.now()))
         return data | {"invite_url": invite}
 
     async def lock(self, actor: EmployeeOrm, employee_id: int) -> dict:
@@ -1520,7 +1594,7 @@ class EmployeeService:
             raise fail("EMPLOYEE_HAS_OPEN_SESSION")
         row.is_active = False
         self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_locked", entity_type="employee", entity_id=row.id))
-        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()))
 
     async def unlock(self, actor: EmployeeOrm, employee_id: int) -> dict:
         row = await self.session.get(EmployeeOrm, employee_id)
@@ -1528,18 +1602,18 @@ class EmployeeService:
             raise fail("EMPLOYEE_NOT_FOUND", 404)
         row.is_active = True
         self.session.add(AuditLogOrm(actor_id=actor.id, action="employee_unlocked", entity_type="employee", entity_id=row.id))
-        return await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+        return await employee_admin_dict(self.session, row, _vn(self.clock.now()))
 
     async def regenerate_invite(self, actor: EmployeeOrm, employee_id: int) -> dict:
         row = await self.session.get(EmployeeOrm, employee_id)
         if not row:
             raise fail("EMPLOYEE_NOT_FOUND", 404)
         if row.telegram_id:
-            data = await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+            data = await employee_admin_dict(self.session, row, _vn(self.clock.now()))
             return data | {"invite_url": None}
         invite = await create_invite(self.session, row, actor.id, self.clock.now())
         self.session.add(AuditLogOrm(actor_id=actor.id, action="invite_regenerated", entity_type="employee", entity_id=row.id))
-        data = await employee_admin_dict(self.session, row, _vn(self.clock.now()).date())
+        data = await employee_admin_dict(self.session, row, _vn(self.clock.now()))
         return data | {"invite_url": invite}
 
     async def rates(self, employee_id: int) -> list[dict]:
@@ -1549,42 +1623,109 @@ class EmployeeService:
         rows = (await self.session.scalars(select(RateHistoryOrm).where(
             RateHistoryOrm.employee_id == employee_id,
         ).order_by(RateHistoryOrm.effective_from.desc()))).all()
-        return [{"id": x.id, "hourly_rate": x.hourly_rate, "effective_from": x.effective_from} for x in rows]
+        return [self._rate_payload(x) for x in rows]
 
-    async def add_rate(self, actor: EmployeeOrm, employee_id: int, hourly_rate: int, effective_from: date) -> dict:
-        employee = await self.session.get(EmployeeOrm, employee_id)
+    async def add_rate(self, actor: EmployeeOrm, employee_id: int, hourly_rate: int, mode: str = "next_shift",
+                       effective_date: date | None = None, reason: str | None = None,
+                       confirm_large_change: bool = False) -> dict:
+        employee = await self.session.scalar(select(EmployeeOrm).where(EmployeeOrm.id == employee_id).with_for_update())
         if not employee:
             raise fail("EMPLOYEE_NOT_FOUND", 404)
-        today = _vn(self.clock.now()).date()
-        if effective_from < today:
-            raise fail("RATE_DATE_IN_PAST", 422)
-        exists = await self.session.scalar(select(RateHistoryOrm.id).where(
+        self._validate_hourly_rate(hourly_rate)
+        reason_value = self._validate_rate_reason(reason)
+        now = _vn(self.clock.now())
+        effective_from = self._effective_from(mode, effective_date)
+        current = await rate_row_at(self.session, employee_id, now)
+        current_rate = current.hourly_rate if current else None
+        if current_rate:
+            delta = abs(hourly_rate - current_rate) / current_rate
+            if delta > 0.5 and not confirm_large_change:
+                direction = "tăng" if hourly_rate > current_rate else "giảm"
+                percent = round(delta * 100, 1)
+                return {
+                    "requires_confirmation": True,
+                    "message": f"Đơn giá {direction} {percent}%: {current_rate:,}đ → {hourly_rate:,}đ/giờ. Vui lòng xác nhận đây là thay đổi chủ động.".replace(",", "."),
+                    "current_hourly_rate": current_rate,
+                    "new_hourly_rate": hourly_rate,
+                }
+        if mode == "date":
+            pending = await pending_rate_row(self.session, employee_id, now)
+            if pending:
+                raise fail("RATE_PENDING_EXISTS", 409, {"pending_rate_id": pending.id, "effective_from": iso_vn(pending.effective_from)})
+        duplicate = await self.session.scalar(select(RateHistoryOrm.id).where(
             RateHistoryOrm.employee_id == employee_id,
+            RateHistoryOrm.cancelled_at.is_(None),
             RateHistoryOrm.effective_from == effective_from,
         ))
-        if exists:
+        if duplicate:
             raise fail("RATE_DATE_EXISTS", 409)
         row = RateHistoryOrm(employee_id=employee_id, hourly_rate=hourly_rate,
-                             effective_from=effective_from, created_by=actor.id)
+                             effective_from=effective_from, reason=reason_value, created_by=actor.id)
         self.session.add(row)
-        self.session.add(AuditLogOrm(actor_id=actor.id, action="rate_added",
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="rate_changed",
                                      entity_type="employee", entity_id=employee_id,
-                                     new_value={"hourly_rate": hourly_rate, "effective_from": str(effective_from)}))
+                                     old_value={"hourly_rate": current_rate},
+                                     new_value={"hourly_rate": hourly_rate, "mode": mode, "effective_from": iso_vn(effective_from)},
+                                     reason=reason_value))
         try:
             await self.session.flush()
         except IntegrityError as exc:
             raise fail("RATE_DATE_EXISTS", 409) from exc
-        return {"id": row.id, "hourly_rate": row.hourly_rate, "effective_from": row.effective_from}
+        if mode == "date":
+            payload = {"hourly_rate": hourly_rate, "effective_from": fmt_date_vn(effective_from.date())}
+            key = f"rate-scheduled:{row.id}"
+            kind = "rate_scheduled"
+        else:
+            payload = {"hourly_rate": hourly_rate}
+            key = f"rate-changed:{row.id}"
+            kind = "rate_changed"
+        notice = _notice(key, employee.telegram_id, kind, payload)
+        if notice:
+            self.session.add(notice)
+        return self._rate_payload(row, now)
+
+    async def cancel_rate(self, actor: EmployeeOrm, employee_id: int, rate_id: int, reason: str) -> dict:
+        employee = await self.session.scalar(select(EmployeeOrm).where(EmployeeOrm.id == employee_id).with_for_update())
+        if not employee:
+            raise fail("EMPLOYEE_NOT_FOUND", 404)
+        reason_value = self._validate_rate_reason(reason)
+        now = _vn(self.clock.now())
+        row = await self.session.scalar(select(RateHistoryOrm).where(
+            RateHistoryOrm.id == rate_id,
+            RateHistoryOrm.employee_id == employee_id,
+        ).with_for_update())
+        if not row:
+            raise fail("RATE_NOT_FOUND", 404)
+        if row.cancelled_at is not None:
+            return self._rate_payload(row, now)
+        if _vn(row.effective_from) <= now:
+            raise fail("RATE_ALREADY_EFFECTIVE", 409)
+        current = await rate_row_at(self.session, employee_id, now)
+        row.cancelled_at = now
+        row.cancelled_by = actor.id
+        row.cancel_reason = reason_value
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="rate_cancelled",
+                                     entity_type="employee", entity_id=employee_id,
+                                     old_value={"rate_id": row.id, "hourly_rate": row.hourly_rate, "effective_from": iso_vn(row.effective_from)},
+                                     reason=reason_value))
+        await self.session.flush()
+        notice = _notice(f"rate-cancelled:{row.id}", employee.telegram_id, "rate_cancelled", {
+            "effective_from": fmt_date_vn(row.effective_from.date()),
+            "current_hourly_rate": current.hourly_rate if current else None,
+        })
+        if notice:
+            self.session.add(notice)
+        return self._rate_payload(row, now)
 
 
 async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, name: str,
-                          hourly_rate: int, effective_from: date, location_id: int | None = None,
-                          clock: Clock | None = None) -> tuple[EmployeeOrm, str]:
+                          hourly_rate: int, effective_from: date | None, location_id: int | None = None,
+                          clock: Clock | None = None, reason: str | None = None) -> tuple[EmployeeOrm, str]:
     clock = clock or Clock()
-    today = _vn(clock.now()).date()
+    now = _vn(clock.now())
     code = code.strip().upper()
     name = name.strip()
-    if effective_from < today or hourly_rate <= 0:
+    if hourly_rate <= 0:
         raise fail("INVALID_EMPLOYEE_DATA", 422)
     if await session.scalar(select(EmployeeOrm.id).where(EmployeeOrm.code == code)):
         raise fail("EMPLOYEE_CODE_EXISTS", 409)
@@ -1601,8 +1742,13 @@ async def create_employee(session: AsyncSession, actor: EmployeeOrm, code: str, 
         await session.flush()
     except IntegrityError as exc:
         raise fail("EMPLOYEE_CODE_EXISTS", 409) from exc
+    if effective_from and effective_from > now.date():
+        rate_effective_from = datetime.combine(effective_from, time(0, 0), tzinfo=VIETNAM_TZ)
+    else:
+        rate_effective_from = now
     session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=hourly_rate,
-                               effective_from=effective_from, created_by=actor.id))
+                               effective_from=rate_effective_from, created_by=actor.id,
+                               reason=(reason or "Đơn giá ban đầu").strip() or "Đơn giá ban đầu"))
     session.add(EmployeeLocationAssignmentOrm(employee_id=employee.id, location_id=location.id,
                                              effective_from=clock.now(), changed_by=actor.id,
                                              reason="Phân công khi tạo nhân viên"))

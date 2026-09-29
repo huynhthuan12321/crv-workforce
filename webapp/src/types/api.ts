@@ -77,6 +77,7 @@ export type Today = {
   checkin_cutoff: string;
   can_check_in: boolean;
   work_location?: WorkLocation | null;
+  pending_rate?: {id: number; hourly_rate: number; effective_from: string} | null;
 };
 
 export type Consent = {
@@ -204,6 +205,8 @@ export type PayrollSummary = {
   full_name: string;
   work_date: string;
   hourly_rate: number | null;
+  rate_snapshots?: number[];
+  rate_count?: number;
   closed_minutes: number;
   eligible_minutes: number;
   eligible_session_ids: number[];
@@ -252,6 +255,8 @@ export type PayrollApproveResult = {
 
 export type ManagedEmployee = Employee & {
   current_hourly_rate: number | null;
+  current_rate_effective_from?: string | null;
+  pending_rate?: {id: number; hourly_rate: number; effective_from: string} | null;
   is_linked: boolean;
   has_open_session: boolean;
   work_location?: WorkLocation | null;
@@ -276,6 +281,14 @@ export type RateHistory = {
   id: number;
   hourly_rate: number;
   effective_from: string;
+  reason?: string | null;
+  created_by?: number | null;
+  created_at?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: number | null;
+  cancel_reason?: string | null;
+  is_pending?: boolean;
+  is_cancelled?: boolean;
 };
 
 export type ReportEmployee = {

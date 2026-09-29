@@ -9,25 +9,38 @@ const root = resolve(import.meta.dirname, "..", "..");
 const outDir = resolve(root, "docs", "screenshots", "gd7c");
 mkdirSync(outDir, {recursive: true});
 
-const browser = await puppeteer.launch({executablePath: chromePath, headless: true});
+const browser = await puppeteer.launch({
+  executablePath: chromePath,
+  headless: "new",
+  args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+});
 
 try {
   for (const [scenario, tab, name] of managerScenarios) {
     for (const theme of ["light", "dark"]) {
       const page = await browser.newPage();
       await page.setViewport({width: 390, height: 844, deviceScaleFactor: 1, isMobile: true});
+      page.setDefaultTimeout(15000);
+      page.setDefaultNavigationTimeout(15000);
       page.on("dialog", (dialog) => dialog.accept());
-      await page.goto(`${baseUrl}/?scenario=${scenario}&tab=${tab}&theme=${theme}`, {waitUntil: "networkidle0"});
+      console.log(`Capturing ${name}_${theme}`);
+      await page.goto(`${baseUrl}/?scenario=${scenario}&tab=${tab}&theme=${theme}`, {waitUntil: "domcontentloaded", timeout: 15000});
+      await page.waitForSelector(".app-shell", {timeout: 10000});
+      await page.waitForFunction(() => document.fonts?.status === "loaded" || !document.fonts, {timeout: 5000}).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (scenario === "manager_employee_detail" || scenario.startsWith("manager_employee_assign")) {
+        await page.waitForFunction(() => !document.body.textContent?.includes("Chưa chọn nhân viên"), {timeout: 10000}).catch(() => {});
+      }
       if (scenario === "manager_already_handled") {
         await page.$$eval("button", (buttons) => {
           const target = buttons.find((button) => button.textContent?.includes("Đã xem"));
           target?.click();
         });
-        await page.waitForNetworkIdle({idleTime: 300, timeout: 3000}).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
       if (scenario === "manager_lock_open") {
         await page.$$eval("button.switch.on", (buttons) => buttons[0]?.click());
-        await page.waitForNetworkIdle({idleTime: 300, timeout: 3000}).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
       await page.screenshot({path: resolve(outDir, `${name}_${theme}.png`)});
       await page.close();
