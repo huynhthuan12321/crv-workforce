@@ -153,7 +153,8 @@ async def test_close_forgotten_and_payroll_notification_texts(session_factory):
 
     async with session_factory() as session:
         notice = await session.scalar(select(NotificationOutboxOrm).where(NotificationOutboxOrm.notification_type == "batch_paid"))
-        assert "Đã duyệt lương đợt 1 ngày 24/04" in notification_text(notice)
+        assert "<b>💰 ĐÃ DUYỆT LƯƠNG</b>" in notification_text(notice)
+        assert "🧾 Đợt: <b>1</b>" in notification_text(notice)
         assert notice.payload["button"]["url"].endswith("tab_history")
 
 

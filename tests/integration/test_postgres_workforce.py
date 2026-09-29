@@ -521,8 +521,8 @@ async def test_2_18_s6_rate_change_notifications_dedupe_and_text(pg_factory):
         keys = [row.dedupe_key for row in rows]
         assert len(keys) == len(set(keys))
         texts = [notification_text(row) for row in rows]
-        assert any("Đơn giá của bạn đã được cập nhật" in text for text in texts)
-        assert any("Đơn giá của bạn sẽ được cập nhật" in text for text in texts)
+        assert any("<b>💵 CẬP NHẬT ĐƠN GIÁ</b>" in text for text in texts)
+        assert any("<b>💵 ĐƠN GIÁ SẮP THAY ĐỔI</b>" in text for text in texts)
         assert any("đã được hủy" in text for text in texts)
         assert all("Tăng theo năng lực" not in text and "Thay đổi công việc" not in text for text in texts)
 

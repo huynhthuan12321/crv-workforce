@@ -5,6 +5,10 @@ from aiogram.types import WebAppInfo
 from source.config import settings
 
 
+def app_tab_url(tab: str) -> str:
+    return f"https://t.me/{settings.tg.bot_username}/{settings.tg.miniapp_short_name}?startapp=tab_{tab}"
+
+
 def get_profile_webapp_keyboard(
     text: str = "👤 Открыть профиль",
 ) -> InlineKeyboardMarkup:

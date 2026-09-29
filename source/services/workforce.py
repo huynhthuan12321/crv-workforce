@@ -1688,11 +1688,15 @@ class EmployeeService:
         except IntegrityError as exc:
             raise fail("RATE_DATE_EXISTS", 409) from exc
         if mode == "date":
-            payload = {"hourly_rate": hourly_rate, "effective_from": fmt_date_vn(effective_from.date())}
+            payload = {
+                "hourly_rate": hourly_rate,
+                "current_hourly_rate": current_rate,
+                "effective_from": fmt_date_vn(effective_from.date()),
+            }
             key = f"rate-scheduled:{row.id}"
             kind = "rate_scheduled"
         else:
-            payload = {"hourly_rate": hourly_rate}
+            payload = {"hourly_rate": hourly_rate, "old_hourly_rate": current_rate}
             key = f"rate-changed:{row.id}"
             kind = "rate_changed"
         notice = _notice(key, employee.telegram_id, kind, payload)

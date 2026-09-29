@@ -22,10 +22,17 @@ from source.database.models import (
 )
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import ReviewService
+from source.telegram.messages import render_notification
 from source.utils.clock import Clock, VIETNAM_TZ
-from source.utils.formatting import fmt_date_vn, fmt_money_vn, fmt_time_vn
+from source.utils.formatting import fmt_date_vn, fmt_time_vn
 
 _notifications_paused_until = None
+
+
+def _elapsed_minutes(now, started_at) -> int:
+    if started_at.tzinfo is None or started_at.utcoffset() is None:
+        started_at = started_at.replace(tzinfo=VIETNAM_TZ)
+    return max(0, int((now - started_at.astimezone(VIETNAM_TZ)).total_seconds() // 60))
 
 
 def app_tab_link(tab: str) -> str:
@@ -37,33 +44,25 @@ def button_payload(text: str, tab: str) -> dict:
 
 
 def notification_markup(row: NotificationOutboxOrm) -> InlineKeyboardMarkup | None:
-    button = (row.payload or {}).get("button")
+    tabs = {
+        "batch_paid": ("📋 Xem chi tiết", "history"),
+        "checkout_reminder": ("🔴 Ra ca ngay", "attendance"),
+        "forgot_sessions": ("🛠 Xử lý ngay", "review"),
+        "forgot_session_closed": ("📦 Khai sản lượng", "outputs"),
+        "rate_changed": ("📱 Mở ứng dụng", "attendance"),
+        "rate_scheduled": ("📱 Mở ứng dụng", "attendance"),
+        "rate_cancelled": ("📱 Mở ứng dụng", "attendance"),
+    }
+    button = tabs.get(row.notification_type)
     if not button:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=button.get("text", "Mở ứng dụng"), url=button.get("url"))
+        InlineKeyboardButton(text=button[0], url=app_tab_link(button[1]))
     ]])
 
 
 def notification_text(row: NotificationOutboxOrm) -> str:
-    p = row.payload or {}
-    if row.notification_type == "batch_paid" and int(p.get("amount", 0)) == 0:
-        return f"Đợt {p.get('batch_no')}: 0đ (đã được làm tròn ở đợt trước)"
-    sessions = p.get("sessions") or []
-    session_lines = "\n".join(
-        f"- {x.get('employee_name')}: {x.get('date')} từ {x.get('check_in')}" for x in sessions
-    )
-    messages = {
-        "checkout_reminder": f"Bạn đang trong ca từ {p.get('check_in', '')}. Vui lòng bấm Ra ca nếu đã nghỉ.",
-        "forgot_sessions": f"Có {p.get('count', 0)} phiên quên ra ca cần xử lý:\n{session_lines}".rstrip(),
-        "forgot_session_closed": f"Phiên ngày {p.get('work_date')} đã được đóng lúc {p.get('closed_time')}. Bạn có 10 phút để khai sản lượng.",
-        "batch_paid": f"Đã duyệt lương đợt {p.get('batch_no')} ngày {p.get('date')}: {fmt_money_vn(p.get('amount', 0))}. Tổng đã nhận hôm nay: {fmt_money_vn(p.get('paid_total', 0))}.",
-        "consent_withdrawn": f"{p.get('employee_name')} đã rút lại đồng ý thu thập vị trí.",
-        "rate_changed": f"Đơn giá của bạn đã được cập nhật.\nMức mới: {fmt_money_vn(p.get('hourly_rate', 0))}/giờ\nÁp dụng từ lần vào ca tiếp theo.",
-        "rate_scheduled": f"Đơn giá của bạn sẽ được cập nhật.\nMức mới: {fmt_money_vn(p.get('hourly_rate', 0))}/giờ\nCó hiệu lực từ {p.get('effective_from')}.",
-        "rate_cancelled": f"Thay đổi đơn giá dự kiến từ {p.get('effective_from')} đã được hủy. Đơn giá hiện tại của bạn vẫn là {fmt_money_vn(p.get('current_hourly_rate', 0))}/giờ.",
-    }
-    return messages.get(row.notification_type, p.get("text", "Thông báo từ CRV Workforce"))
+    return render_notification(row.notification_type, row.payload or {})
 
 
 async def enqueue_if_missing(session: AsyncSession, **values) -> None:
@@ -81,9 +80,12 @@ async def reminder_job(factory: async_sessionmaker[AsyncSession], clock: Clock |
         for row in rows:
             employee = await session.get(EmployeeOrm, row.employee_id)
             if employee and employee.telegram_id:
+                minutes = _elapsed_minutes(now, row.check_in_at)
                 await enqueue_if_missing(session, dedupe_key=f"reminder:{now.date()}:{row.id}",
                     chat_id=employee.telegram_id, notification_type="checkout_reminder",
                     payload={"session_id": row.id, "check_in": fmt_time_vn(row.check_in_at),
+                             "minutes": minutes, "location_code": row.location_code_snapshot,
+                             "location_name": row.location_name_snapshot,
                              "button": button_payload("Mở ứng dụng", "attendance")})
 
 
@@ -94,8 +96,11 @@ async def _session_payloads(session: AsyncSession, rows: list[WorkSessionOrm]) -
         result.append({
             "session_id": row.id,
             "employee_name": employee.full_name if employee else str(row.employee_id),
+            "employee_code": employee.code if employee else "",
             "date": fmt_date_vn(row.check_in_at),
             "check_in": fmt_time_vn(row.check_in_at),
+            "location_code": row.location_code_snapshot,
+            "location_name": row.location_name_snapshot,
         })
     return result
 
