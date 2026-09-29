@@ -9,7 +9,7 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import attendance, client_errors, consent, employees, history, locations, outputs, payroll, reports, review, working
+from source.api.routes import attendance, client_errors, consent, employees, history, locations, messaging, outputs, payroll, reports, review, working
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
@@ -118,6 +118,7 @@ def setup_api(app: FastAPI) -> None:
     app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
     app.include_router(locations.router, prefix=f"{API_PREFIX}/locations", tags=["Locations"])
     app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
+    app.include_router(messaging.router, prefix=API_PREFIX, tags=["Messaging"])
 
     @app.on_event("startup")
     async def startup_rate_limiter() -> None:

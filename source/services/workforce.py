@@ -151,8 +151,8 @@ async def current_consent(session: AsyncSession, employee_id: int, now: datetime
 async def employee_payload(session: AsyncSession, employee: EmployeeOrm, now: datetime | None = None) -> dict:
     tabs = {
         "employee": ["attendance", "outputs", "history"],
-        "manager": ["working", "review", "payroll", "employees"],
-        "director": ["reports", "review", "payroll"],
+        "manager": ["working", "review", "payroll", "employees", "messages"],
+        "director": ["reports", "review", "payroll", "messages"],
     }[employee.role.value]
     _, accepted = await current_consent(session, employee.id, now or Clock().now())
     return {"id": employee.id, "code": employee.code, "full_name": employee.full_name,

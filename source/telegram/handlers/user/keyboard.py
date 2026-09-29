@@ -41,14 +41,14 @@ async def open_tab_from_reply(message: Message) -> None:
 
 @user_keyboard_router.message(F.text == "💬 Nhắn quản lý")
 async def contact_manager(message: Message) -> None:
-    await message.answer(
-        "Mở ứng dụng để nhắn quản lý.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📱 Mở ứng dụng", url=app_tab_url("attendance"))
-        ]]),
-    )
+    await message.answer("Hãy gửi nội dung cần nhắn; bot sẽ hỏi người nhận.")
 
 
 @user_keyboard_router.message(F.text == "📢 Gửi thông báo")
 async def send_announcement_hint(message: Message) -> None:
-    await message.answer("Tính năng gửi thông báo sẽ được mở trong ứng dụng.")
+    await message.answer(
+        "Mở tab Tin nhắn để soạn thông báo.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📱 Mở Tin nhắn", url=app_tab_url("messages"))
+        ]]),
+    )

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import inspect
 import hmac
 import json
 import os
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 from source.config import settings
 from source.database.models import (
-    BotHeartbeatOrm, EmployeeOrm, NotificationOutboxOrm, SyncOutboxOrm, WorkSessionOrm,
+    AnnouncementRecipientOrm, BotHeartbeatOrm, EmployeeOrm, MessageRelayOrm, NotificationOutboxOrm, SyncOutboxOrm, WorkSessionOrm,
 )
 from source.enums import EmployeeRole, OutboxStatus, SessionStatus
 from source.services.workforce import ReviewService
@@ -46,6 +47,12 @@ def button_payload(text: str, tab: str) -> dict:
 
 
 def notification_markup(row: NotificationOutboxOrm) -> InlineKeyboardMarkup | None:
+    if row.notification_type == "announcement":
+        announcement_id = (row.payload or {}).get("announcement_id")
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Đã nhận", callback_data=f"announcement_ack:{announcement_id}"),
+            InlineKeyboardButton(text="📱 Mở ứng dụng", url=app_tab_link("messages")),
+        ]])
     tabs = {
         "batch_paid": ("📋 Xem chi tiết", "history"),
         "checkout_reminder": ("🔴 Ra ca ngay", "attendance"),
@@ -76,6 +83,22 @@ def notification_text(row: NotificationOutboxOrm) -> str:
 def _plain_notification_text(value: str) -> str:
     """Remove Telegram HTML tags while preserving escaped user content."""
     return unescape(re.sub(r"</?(?:b|strong|s|i|u|code|pre|a)(?:\s[^>]*)?>", "", value, flags=re.IGNORECASE))
+
+
+async def _send_notification(bot: Bot, chat_id: int, text: str, *, reply_markup=None, html: bool = True):
+    """Send notifications as HTML while remaining compatible with lightweight bot fakes."""
+    kwargs = {"reply_markup": reply_markup}
+    try:
+        parameters = inspect.signature(bot.send_message).parameters
+        if html and ("parse_mode" in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )):
+            kwargs["parse_mode"] = "HTML"
+    except (TypeError, ValueError):
+        if html:
+            kwargs["parse_mode"] = "HTML"
+    return await bot.send_message(chat_id, text, **kwargs)
 
 
 async def enqueue_if_missing(session: AsyncSession, **values) -> None:
@@ -209,7 +232,27 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
         for row in rows:
             try:
                 text_value = notification_text(row)
-                await bot.send_message(row.chat_id, text_value, reply_markup=notification_reply_markup(row))
+                sent_message = await _send_notification(
+                    bot, row.chat_id, text_value,
+                    reply_markup=notification_reply_markup(row),
+                )
+                if row.notification_type == "announcement":
+                    recipient_id = (row.payload or {}).get("recipient_id")
+                    if recipient_id:
+                        async with session.begin_nested():
+                            recipient = await session.get(AnnouncementRecipientOrm, recipient_id)
+                            if recipient:
+                                recipient.telegram_message_id = getattr(sent_message, "message_id", None)
+                                recipient.delivered_at = now
+                if row.notification_type == "private_message":
+                    message_id = (row.payload or {}).get("message_id")
+                    telegram_message_id = getattr(sent_message, "message_id", None)
+                    if message_id and telegram_message_id:
+                        session.add(MessageRelayOrm(
+                            message_id=message_id,
+                            chat_id=row.chat_id,
+                            telegram_message_id=telegram_message_id,
+                        ))
                 row.status, row.sent_at = OutboxStatus.sent, now
             except TelegramForbiddenError:
                 row.status, row.last_error = OutboxStatus.failed, "bot_blocked"
@@ -234,11 +277,28 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
                     row.id,
                 )
                 try:
-                    await bot.send_message(
+                    fallback_message = await _send_notification(
+                        bot,
                         row.chat_id,
                         _plain_notification_text(notification_text(row)),
                         reply_markup=notification_reply_markup(row),
+                        html=False,
                     )
+                    if row.notification_type == "announcement":
+                        recipient_id = (row.payload or {}).get("recipient_id")
+                        recipient = await session.get(AnnouncementRecipientOrm, recipient_id) if recipient_id else None
+                        if recipient:
+                            recipient.telegram_message_id = getattr(fallback_message, "message_id", None)
+                            recipient.delivered_at = now
+                    if row.notification_type == "private_message":
+                        message_id = (row.payload or {}).get("message_id")
+                        telegram_message_id = getattr(fallback_message, "message_id", None)
+                        if message_id and telegram_message_id:
+                            session.add(MessageRelayOrm(
+                                message_id=message_id,
+                                chat_id=row.chat_id,
+                                telegram_message_id=telegram_message_id,
+                            ))
                     row.status, row.sent_at = OutboxStatus.sent, now
                     row.last_error = "html_parse_fallback"
                 except Exception as fallback_exc:
