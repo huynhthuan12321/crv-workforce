@@ -246,6 +246,7 @@ class ReportTimeseriesOut(BaseModel):
 class HistorySessionOut(WorkSessionOut):
     pay_batch_id: int | None = None
     pending_reason: str | None = None
+    payroll_group: str | None = None
     output_locked: bool = False
     output_locked_at: str | None = None
     output: list[ProductTotalOut] = []

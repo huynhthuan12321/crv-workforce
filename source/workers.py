@@ -3,13 +3,15 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from datetime import timedelta
+from html import unescape
 from time import monotonic
 
 import httpx
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from sqlalchemy import select
@@ -61,8 +63,19 @@ def notification_markup(row: NotificationOutboxOrm) -> InlineKeyboardMarkup | No
     ]])
 
 
+def notification_reply_markup(row: NotificationOutboxOrm) -> InlineKeyboardMarkup | ReplyKeyboardRemove | None:
+    if row.notification_type == "account_locked":
+        return ReplyKeyboardRemove()
+    return notification_markup(row)
+
+
 def notification_text(row: NotificationOutboxOrm) -> str:
     return render_notification(row.notification_type, row.payload or {})
+
+
+def _plain_notification_text(value: str) -> str:
+    """Remove Telegram HTML tags while preserving escaped user content."""
+    return unescape(re.sub(r"</?(?:b|strong|s|i|u|code|pre|a)(?:\s[^>]*)?>", "", value, flags=re.IGNORECASE))
 
 
 async def enqueue_if_missing(session: AsyncSession, **values) -> None:
@@ -195,7 +208,8 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
         ).order_by(NotificationOutboxOrm.id).limit(50))).all())
         for row in rows:
             try:
-                await bot.send_message(row.chat_id, notification_text(row), reply_markup=notification_markup(row))
+                text_value = notification_text(row)
+                await bot.send_message(row.chat_id, text_value, reply_markup=notification_reply_markup(row))
                 row.status, row.sent_at = OutboxStatus.sent, now
             except TelegramForbiddenError:
                 row.status, row.last_error = OutboxStatus.failed, "bot_blocked"
@@ -204,6 +218,32 @@ async def process_notifications(bot: Bot, factory: async_sessionmaker[AsyncSessi
                 row.next_attempt_at = _notifications_paused_until
                 await session.commit()
                 return
+            except TelegramBadRequest as exc:
+                if "can't parse entities" not in str(exc).lower():
+                    row.attempts += 1
+                    row.last_error = type(exc).__name__
+                    if row.attempts >= 10:
+                        row.status = OutboxStatus.failed
+                    else:
+                        row.next_attempt_at = now + timedelta(seconds=min(3600, 2 ** row.attempts * 10))
+                    await session.commit()
+                    continue
+                logger.warning(
+                    "Telegram HTML parse fallback notification_type={} notification_id={}",
+                    row.notification_type,
+                    row.id,
+                )
+                try:
+                    await bot.send_message(
+                        row.chat_id,
+                        _plain_notification_text(notification_text(row)),
+                        reply_markup=notification_reply_markup(row),
+                    )
+                    row.status, row.sent_at = OutboxStatus.sent, now
+                    row.last_error = "html_parse_fallback"
+                except Exception as fallback_exc:
+                    row.status = OutboxStatus.failed
+                    row.last_error = type(fallback_exc).__name__
             except Exception as exc:
                 row.attempts += 1
                 row.last_error = type(exc).__name__

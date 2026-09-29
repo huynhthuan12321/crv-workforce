@@ -1,6 +1,6 @@
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 from sqlalchemy import select
 
 from source.api.dependencies import session_factory
@@ -22,4 +22,7 @@ async def start(message: Message) -> None:
         )
         await message.answer("Bạn có thể dùng các nút bên dưới để mở nhanh.", reply_markup=role_reply_keyboard(employee.role))
         return
-    await message.answer("Bạn chưa được liên kết. Hãy mở link mời do quản lý gửi.")
+    await message.answer(
+        "Bạn chưa được liên kết. Hãy mở link mời do quản lý gửi.",
+        reply_markup=ReplyKeyboardRemove(),
+    )

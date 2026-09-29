@@ -129,6 +129,10 @@ def rate_cancelled(payload: Mapping[str, Any]) -> str:
     )
 
 
+def account_locked(payload: Mapping[str, Any]) -> str:
+    return "Tài khoản đã bị khóa."
+
+
 MESSAGE_BUILDERS = {
     "batch_paid": batch_paid,
     "checkout_reminder": checkout_reminder,
@@ -138,6 +142,7 @@ MESSAGE_BUILDERS = {
     "rate_changed": rate_changed,
     "rate_scheduled": rate_scheduled,
     "rate_cancelled": rate_cancelled,
+    "account_locked": account_locked,
 }
 
 
