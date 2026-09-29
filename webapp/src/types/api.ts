@@ -8,7 +8,8 @@ export type TabKey =
   | "review"
   | "payroll"
   | "employees"
-  | "reports";
+  | "reports"
+  | "messages";
 
 export type Employee = {
   id: number;

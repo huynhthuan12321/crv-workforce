@@ -66,6 +66,18 @@ class MockApi {
       return outputForScenario(this.scenario, sessionId) as OutputForm as T;
     }
     if (path === "/history") return mockHistory as History as T;
+    if (path === "/announcements" && options.method === "POST") return {id: 2, recipient_count: 3, skipped_count: 1} as T;
+    if (path === "/announcements") return [
+      {id: 1, sender_id: 11, sender_role: "director", audience_type: "employees", body: "Ngày mai xưởng bắt đầu lúc 7:30.", created_at: "2026-09-29T09:00:00+07:00", recipient_count: 8, acknowledged_count: 5},
+    ] as T;
+    if (path.startsWith("/conversations/") && path.endsWith("/messages")) return [
+      {id: 1, sender_id: 1, direction: "from_staff", body: "Em đã nhận thông báo.", created_at: "2026-09-29T09:05:00+07:00"},
+    ] as T;
+    if (path.startsWith("/conversations?")) return [
+      {id: 1, employee_code: "NV001", employee_name: "Nguyễn Văn A", channel: "manager"},
+      {id: 2, employee_code: "NV002", employee_name: "Lê Thị B", channel: "manager"},
+    ] as T;
+    if (path.includes("/messages") && options.method === "POST") return [{id: 2, body: "Đã gửi"}] as T;
     if (path.startsWith("/reports/employees")) return mockReportEmployees as T;
     if (path.startsWith("/reports/summary")) {
       if (this.scenario === "director_report_empty") return {...mockReportSummary, minutes: 0, paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, total: 0, bags: 0, kg: 0, salary: {paid: 0, pending: 0, pending_eligible: 0, pending_blocked: 0, needs_review_count: 0, total: 0}} as T;

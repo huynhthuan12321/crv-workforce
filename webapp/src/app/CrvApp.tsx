@@ -10,6 +10,7 @@ import {HistoryScreen} from "../features/history/HistoryScreen";
 import {EmployeesScreen, PayrollScreen, ReviewScreen, WorkingScreen} from "../features/manager/ManagerScreens";
 import {OutputsScreen} from "../features/outputs/OutputsScreen";
 import {ReportsScreen} from "../features/director/ReportsScreen";
+import {MessagesScreen} from "../features/messages/MessagesScreen";
 import {useTelegram} from "../hooks/useTelegram";
 import {useKeyboardAvoidance} from "../lib/keyboard";
 import type {Employee, TabKey} from "../types/api";
@@ -117,6 +118,7 @@ export function CrvApp() {
     payroll: <PayrollScreen onOpenReviewGps={(sessionId) => { setReviewInitialFilter("gps"); setReviewInitialSessionId(sessionId ?? null); setTab("review"); }} />,
     employees: <EmployeesScreen />,
     reports: <ReportsScreen />,
+    messages: <MessagesScreen role={user.role === "director" ? "director" : "manager"} />,
   };
 
   return (

@@ -48,6 +48,7 @@ export const managerScenarios = [
   ["manager_locations", "employees", "17_danh_sach_kho"],
   ["manager_locations_in_use", "employees", "17b_ngung_dung_bi_chan"],
   ["manager_lock_open", "employees", "18_khoa_dang_trong_ca"],
+  ["manager_messages", "messages", "19_tin_nhan"],
 ];
 
 export const directorScenarios = [
@@ -60,6 +61,7 @@ export const directorScenarios = [
   ["director_review", "review", "07_can_xu_ly"],
   ["director_payroll", "payroll", "08_duyet_luong"],
   ["director_payroll_detail", "payroll", "09_chi_tiet_luong"],
+  ["director_messages", "messages", "10_tin_nhan"],
 ];
 
 export const scenarios = [...employeeScenarios, ...managerScenarios, ...directorScenarios];

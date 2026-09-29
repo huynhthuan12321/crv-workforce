@@ -16,6 +16,7 @@ function TabIcon({tab}: {tab: TabKey}) {
     payroll: <><path d="M7 7h10" /><path d="M7 12h10" /><path d="M7 17h6" /><path d="M5 4h14v16H5z" /></>,
     employees: <><path d="M16 19v-1.5A3.5 3.5 0 0 0 12.5 14h-5A3.5 3.5 0 0 0 4 17.5V19" /><circle cx="10" cy="8" r="3" /><path d="M20 19v-1a3 3 0 0 0-2-2.8" /><path d="M17 5.3a3 3 0 0 1 0 5.4" /></>,
     reports: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-5" /><path d="M12 16V8" /><path d="M16 16v-3" /></>,
+    messages: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="m7 9 5 3 5-3" /></>,
   };
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>

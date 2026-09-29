@@ -9,6 +9,7 @@ export const tabLabels: Record<TabKey, string> = {
   payroll: "Duyệt lương",
   employees: "Quản lý",
   reports: "Báo cáo",
+  messages: "Tin nhắn",
 };
 
 export const tabIcons: Record<TabKey, string> = {
@@ -20,6 +21,7 @@ export const tabIcons: Record<TabKey, string> = {
   payroll: "₫",
   employees: "◎",
   reports: "▥",
+  messages: "✉",
 };
 
 export const roleLabels: Record<Role, string> = {
