@@ -117,3 +117,32 @@ class ApiClient {
 }
 
 export const api = new ApiClient();
+
+export type ClientErrorPayload = {
+  message: string;
+  stack?: string;
+  tab?: string;
+  role?: string;
+  app_version?: string;
+};
+
+export function reportClientError(payload: ClientErrorPayload) {
+  if (USE_MOCK) return;
+  const key = `crv_client_error:${payload.tab ?? "unknown"}:${payload.message.slice(0, 80)}`;
+  const now = Date.now();
+  const last = Number(localStorage.getItem(key) || "0");
+  if (now - last < 60_000) return;
+  localStorage.setItem(key, String(now));
+  const safePayload = {
+    message: payload.message.slice(0, 500),
+    stack: payload.stack?.slice(0, 4000),
+    tab: payload.tab?.slice(0, 64),
+    role: payload.role?.slice(0, 64),
+    app_version: payload.app_version?.slice(0, 64),
+  };
+  void fetch(`${API_URL}/client-errors`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(safePayload),
+  }).catch(() => {});
+}

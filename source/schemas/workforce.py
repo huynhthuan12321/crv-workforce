@@ -85,6 +85,7 @@ class TodayOut(BaseModel):
     can_check_in: bool
     work_location: dict | None = None
     pending_rate: dict | None = None
+    pending_rates: list[dict] = []
 
 
 class EmployeeOut(BaseModel):
@@ -97,6 +98,7 @@ class EmployeeOut(BaseModel):
     current_hourly_rate: int | None = None
     current_rate_effective_from: str | None = None
     pending_rate: dict | None = None
+    pending_rates: list[dict] = []
     is_linked: bool | None = None
     has_open_session: bool | None = None
     work_location: dict | None = None

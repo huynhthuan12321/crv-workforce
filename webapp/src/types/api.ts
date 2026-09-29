@@ -78,6 +78,7 @@ export type Today = {
   can_check_in: boolean;
   work_location?: WorkLocation | null;
   pending_rate?: {id: number; hourly_rate: number; effective_from: string} | null;
+  pending_rates?: Array<{id: number; hourly_rate: number; effective_from: string; reason?: string | null; is_out_of_range?: boolean}>;
 };
 
 export type Consent = {
@@ -257,6 +258,7 @@ export type ManagedEmployee = Employee & {
   current_hourly_rate: number | null;
   current_rate_effective_from?: string | null;
   pending_rate?: {id: number; hourly_rate: number; effective_from: string} | null;
+  pending_rates?: Array<{id: number; hourly_rate: number; effective_from: string; reason?: string | null; is_out_of_range?: boolean}>;
   is_linked: boolean;
   has_open_session: boolean;
   work_location?: WorkLocation | null;
@@ -289,6 +291,7 @@ export type RateHistory = {
   cancel_reason?: string | null;
   is_pending?: boolean;
   is_cancelled?: boolean;
+  is_out_of_range?: boolean;
 };
 
 export type ReportEmployee = {

@@ -1,7 +1,8 @@
 import {Component, type ErrorInfo, type ReactNode} from "react";
+import {reportClientError} from "../api/client";
 import {Button, Card} from "./ui";
 
-type Props = {children: ReactNode; title?: string};
+type Props = {children: ReactNode; title?: string; tab?: string; role?: string};
 type State = {error: Error | null};
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -13,6 +14,13 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("CRV UI error", error, info.componentStack);
+    reportClientError({
+      message: error.message || "Render error",
+      stack: `${error.stack ?? ""}\n${info.componentStack ?? ""}`,
+      tab: this.props.tab,
+      role: this.props.role,
+      app_version: import.meta.env.VITE_APP_VERSION || "dev",
+    });
   }
 
   render() {

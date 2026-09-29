@@ -235,6 +235,7 @@ async def test_permission_table_covers_all_api_routes(permission_context):
         ("GET", "/api/health"),
         ("POST", "/api/auth/session"),
         ("POST", "/api/auth/redeem-invite"),
+        ("POST", "/api/client-errors"),
     }
     actual = {
         (method.upper(), path)

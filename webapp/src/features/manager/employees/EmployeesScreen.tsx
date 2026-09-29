@@ -37,6 +37,20 @@ function detailCount(value: unknown) {
   return 0;
 }
 
+const MIN_HOURLY_RATE = 1_000;
+const MAX_HOURLY_RATE = 1_000_000;
+
+function isRateOutOfRange(rate: Pick<RateHistory, "hourly_rate"> & {is_out_of_range?: boolean}) {
+  return Boolean(rate.is_out_of_range)
+    || rate.hourly_rate < MIN_HOURLY_RATE
+    || rate.hourly_rate > MAX_HOURLY_RATE;
+}
+
+export function pendingRatesForDisplay(employee: ManagedEmployee): RateHistory[] {
+  if (employee.pending_rates?.length) return employee.pending_rates as RateHistory[];
+  return employee.pending_rate ? [employee.pending_rate as RateHistory] : [];
+}
+
 export function formatLocationInUseMessage(locationName: string, details?: LocationUseDetails | null) {
   const assignments = detailCount(details?.current_assignments);
   const openSessions = detailCount(details?.open_sessions);
@@ -369,7 +383,7 @@ function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onC
   );
 }
 
-function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedEmployee | null; onBack: () => void; onChanged: () => void}) {
+export function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedEmployee | null; onBack: () => void; onChanged: () => void}) {
   const scenario = mockScenario();
   const [rates, setRates] = useState<RateHistory[]>([]);
   const [rate, setRate] = useState({hourly_rate: 32000, mode: "next_shift", effective_date: todayVN(), reason: "Tăng theo năng lực", confirm_large_change: false});
@@ -408,6 +422,7 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
 
   const currentLocation = detail.current_location ?? (detail.work_location ? {id: detail.work_location.id, code: detail.work_location.code, name: detail.work_location.name, effective_from: undefined} : null);
   const otherLocations = locations.filter((location) => location.id !== currentLocation?.id);
+  const pendingRates = pendingRatesForDisplay(detail);
 
   const saveRate = async () => {
     setBusy(true);
@@ -520,17 +535,19 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
           </div>
         </div>
         <Metric label={`Đơn giá hiện tại${detail.current_rate_effective_from ? ` · Hiệu lực từ ${fmtDateTime(detail.current_rate_effective_from)}` : ""}`} value={`${fmtMoney(detail.current_hourly_rate ?? 0)}/giờ`} />
-        {detail.pending_rate && (
-          <div className="history-block history-block--pending">
+        {pendingRates.map((item) => (
+          <div className="history-block history-block--pending" key={item.id}>
             <div className="manager-row">
               <div>
                 <b>Mức hẹn</b>
-                <small>Từ {fmtDateTime(detail.pending_rate.effective_from)} · {fmtMoney(detail.pending_rate.hourly_rate)}/giờ</small>
+                <small>Từ {fmtDateTime(item.effective_from)} · {fmtMoney(item.hourly_rate)}/giờ</small>
+                {isRateOutOfRange(item) && <small className="form-error">Vượt giới hạn cho phép – nên hủy</small>}
+                {item.reason && <small>Lý do: {item.reason}</small>}
               </div>
-              <Button className="small-button" tone="secondary" busy={busy} onClick={() => void cancelRate(detail.pending_rate as RateHistory)}>Hủy</Button>
+              <Button className="small-button" tone="secondary" busy={busy} onClick={() => void cancelRate(item)}>Hủy</Button>
             </div>
           </div>
-        )}
+        ))}
         <SectionTitle title="Điều chỉnh đơn giá" />
         <p className="muted">Phiên đang làm hiện tại không bị thay đổi đơn giá.</p>
         <label className="form-field">Mức mới (đ/giờ)<input type="number" value={rate.hourly_rate} onChange={(event) => setRate({...rate, hourly_rate: Number(event.target.value), confirm_large_change: false})} /></label>
@@ -551,6 +568,7 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
             <small>Từ {fmtDateTime(item.effective_from)}</small>
             {item.reason && <small>Lý do: {item.reason}</small>}
             {item.is_cancelled && <Chip tone="neutral">Đã hủy</Chip>}
+            {isRateOutOfRange(item) && !item.is_cancelled && <Chip tone="warning">Vượt giới hạn</Chip>}
           </div>)}
         </div>
         <div className="history-block">

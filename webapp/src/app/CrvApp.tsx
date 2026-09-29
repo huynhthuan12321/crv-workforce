@@ -129,7 +129,7 @@ export function CrvApp() {
         onTab={(next) => { setSpecial(null); setTab(next); }}
         onPrivacy={() => setSpecial("privacy")}
       >
-        <ErrorBoundary title="Tab bị lỗi">
+        <ErrorBoundary title="Tab bị lỗi" tab={tab} role={user.role}>
           {special === "consent" && <ConsentGate onAccepted={() => { setUser({...user, has_location_consent: true}); setSpecial(null); }} onPrivacy={() => setSpecial("privacy")} />}
           {special === "privacy" && <PrivacyScreen onBack={leaveSpecial} onConsentChanged={() => setUser({...user, has_location_consent: false})} />}
           {!special && views[tab]}
