@@ -12,9 +12,9 @@
 
 | Vai trò | Mã | Tab trong app | Quyền |
 |---|---|---|---|
-| Nhân viên | `employee` | Chấm công · Sản lượng · Lịch sử | Vào/ra ca, khai sản lượng, xem dữ liệu **của chính mình**, xem kho được phân công và khoảng cách tại thời điểm chấm công |
-| Quản lý | `manager` | Đang làm · Cần xử lý · Duyệt lương · Nhân viên | Xử lý phiên bất thường, sửa giờ công, duyệt lương, quản lý nhân viên, đơn giá, kho và phân công kho. **Không chấm công, không có lương trong app** |
-| Giám đốc | `director` | Báo cáo · Cần xử lý · Duyệt lương | Xem báo cáo (chỉ xem). Xử lý phiên bất thường và duyệt lương **giống quản lý** (làm thay khi quản lý vắng, luôn có quyền). Được xem/thêm/sửa/ngừng dùng/kích hoạt kho, lọc báo cáo theo kho. **Không** quản lý nhân viên, **không** cài đơn giá, **không** phân công nhân viên vào kho |
+| Nhân viên | `employee` | Chấm công · Sản lượng · Lịch sử | Vào/ra ca, khai sản lượng, xem dữ liệu **của chính mình**, xem kho được phân công và khoảng cách tại thời điểm chấm công; nhận thông báo và nhắn tới quản lý/giám đốc theo 2.21 |
+| Quản lý | `manager` | Đang làm · Cần xử lý · Duyệt lương · Quản lý · Tin nhắn | Xử lý phiên bất thường, sửa giờ công, duyệt lương, quản lý nhân viên, đơn giá, kho và phân công kho. **Không chấm công, không có lương trong app**. Gửi thông báo **chỉ cho nhân viên**, xem/trả lời hộp thư kênh Quản lý |
+| Giám đốc | `director` | Báo cáo · Cần xử lý · Duyệt lương · Tin nhắn | Xem báo cáo (chỉ xem). Xử lý phiên bất thường và duyệt lương **giống quản lý** (làm thay khi quản lý vắng, luôn có quyền). Được xem/thêm/sửa/ngừng dùng/kích hoạt kho, lọc báo cáo theo kho. **Không** quản lý nhân viên, **không** cài đơn giá, **không** phân công nhân viên vào kho. Gửi thông báo tới mọi nhóm theo 2.21, xem kênh Giám đốc và xem chỉ đọc kênh Quản lý |
 
 - Một Mini App duy nhất. Vai trò xác định bằng Telegram ID đã liên kết với hồ sơ.
 - **Phạm vi dữ liệu được xem:**
@@ -79,6 +79,7 @@
 - Quản lý hoặc giám đốc nhập **giờ ra** cho phiên đó, kèm **lý do bắt buộc**. Giờ ra phải sau giờ vào và cùng ngày.
 - **Quét phiên tồn:** mỗi khi service bot khởi động và lúc **00:05** hằng ngày, mọi phiên `open` có `work_date` trước hôm nay được chuyển thành `needs_review` (lý do `forgot_checkout`) và báo cho quản lý, giám đốc. Mục đích: server dừng lâu hoặc scheduler lỗi cũng không để phiên cũ treo ở trạng thái `open`.
 - Mọi job thông báo đều chống gửi trùng bằng `notification_outbox.dedupe_key` (unique).
+- Thông báo do người dùng tạo và tin nhắn riêng tuân theo SPEC 2.21: luôn là chat 1-1 qua bot, lưu vĩnh viễn trong PostgreSQL, không đồng bộ Lark, chỉ gửi tới người đang hoạt động và đã liên kết Telegram. Quyền xem, trả lời, xác nhận đã nhận, giới hạn 2.000 ký tự và thời gian chờ chọn người nhận thực hiện ở backend; frontend/bot không tự suy diễn quyền.
 
 ### 2.8. Mục "Cần xử lý"
 
@@ -398,3 +399,59 @@ Ví dụ: 08:00–10:00 @30k = 60.000; 13:00–17:00 @40k = 160.000 → 220.000�
 #### 2.18.8. Ngoài phạm vi 2.18
 
 Khoản điều chỉnh lương (SPEC 2.19 cũ) đã BỎ – không triển khai. Sửa lương phiên đã qua / đợt đã duyệt: không làm trong hệ thống.
+
+### 2.21. Thông báo và tin nhắn riêng
+
+Trạng thái: **ĐÃ CHỐT – đóng băng trước khi code.** Đây là nguồn quy tắc duy nhất cho tính năng thông báo và tin nhắn riêng. Liên quan: 2.2 (vai trò), 2.7 (bot), 2.17 (lọc người nhận theo kho).
+
+#### 2.21.0. Quy tắc gốc
+
+Mọi tin đi qua bot dưới dạng chat 1-1 giữa từng người và bot; không dùng nhóm hay kênh. Một người chỉ đọc được tin mà quyền bên dưới cho phép; không có đường nào để tin của một nhân viên đến nhân viên khác. Mọi thông báo và tin nhắn được lưu vĩnh viễn trong DB, không đồng bộ Lark.
+
+#### 2.21.1. Ai gửi thông báo cho ai
+
+| Người gửi | Đối tượng |
+|---|---|
+| Giám đốc | Tất cả · Chỉ quản lý · Chỉ nhân viên · Theo kho · Chọn từng người |
+| Quản lý | Chỉ nhân viên: Tất cả nhân viên · Theo kho · Chọn từng người |
+
+Chỉ gửi tới người đang hoạt động và đã liên kết Telegram. Màn soạn hiển thị “Sẽ gửi tới N người (bỏ qua M: chưa liên kết / bị khóa)”. Tin phải ghi rõ người gửi: “📢 THÔNG BÁO TỪ GIÁM ĐỐC” hoặc “📢 THÔNG BÁO TỪ QUẢN LÝ [tên]”. Nút dưới tin: “✅ Đã nhận” và “📱 Mở ứng dụng”. Gửi qua `notification_outbox`, chống trùng và xử lý 403/429 như các tin bot hiện có.
+
+#### 2.21.2. Trả lời và tin nhắn tự do
+
+Trả lời thông báo của giám đốc chỉ đến giám đốc. Trả lời thông báo của quản lý X đến X và giám đốc. Tin nhắn tự do của nhân viên hỏi “Gửi tới: 👔 Quản lý / 🏢 Giám đốc”; quản lý chỉ có lựa chọn Giám đốc. Lựa chọn hết hạn sau 10 phút thì hủy và báo gửi lại. Người nhận Reply tin chuyển tiếp chỉ gửi lại đúng người gửi gốc. Chỉ hỗ trợ tin chữ tối đa 2.000 ký tự; ảnh/tệp/sticker trả “Hiện chỉ hỗ trợ tin nhắn chữ”. Người chưa liên kết không được chuyển tiếp.
+
+#### 2.21.3. Quyền xem hội thoại
+
+Hội thoại được xác định theo cặp (nhân viên, kênh) với kênh Quản lý hoặc Giám đốc. Nhân viên chỉ thấy tin của chính mình. Quản lý xem và trả lời kênh Quản lý, không xem kênh Giám đốc. Giám đốc xem và trả lời kênh Giám đốc; xem **chỉ đọc** mọi hội thoại kênh Quản lý và mọi thông báo của quản lý.
+
+#### 2.21.4. Đã nhận
+
+Bấm “✅ Đã nhận” nhiều lần chỉ ghi lần đầu. Nút đổi thành “✅ Đã nhận lúc HH:MM”. Người gửi xem được số đã gửi/đã nhận/chưa nhận và danh sách tương ứng.
+
+#### 2.21.5. Mô hình dữ liệu
+
+Migration 0007 tạo:
+
+- `announcements(id, sender_id, sender_role, audience_type, location_id, body, created_at)`;
+- `announcement_recipients(announcement_id, employee_id, telegram_message_id, delivered_at, acknowledged_at)` với unique `(announcement_id, employee_id)`;
+- `conversations(id, employee_id, channel)` với unique `(employee_id, channel)`;
+- `messages(id, conversation_id, sender_id, direction, body, announcement_id, created_at, read_by)`;
+- `message_relays(message_id, chat_id, telegram_message_id)` với unique `(chat_id, telegram_message_id)`;
+- `pending_free_messages(employee_id, text, telegram_message_id, expires_at)`.
+
+#### 2.21.6. Giao diện
+
+Quản lý và giám đốc có tab “Tin nhắn” với badge chưa đọc. Quản lý có “Thông báo” (soạn chỉ cho nhân viên) và “Hộp thư” kênh Quản lý. Giám đốc có thông báo của mình và của quản lý, hộp thư kênh Giám đốc, cùng mục Quản lý chỉ đọc. Soạn thông báo có chọn đối tượng, nội dung tối đa 2.000 ký tự, xem trước số người nhận và hộp xác nhận. Chi tiết hiển thị người gửi, thời gian, nội dung và “Đã nhận N/M”. Hội thoại hiển thị bong bóng, trích dẫn thông báo, ô trả lời; dùng `lib/keyboard.ts`. Nếu 5 tab chật ở 360px, đưa Tin nhắn thành biểu tượng phong bì trên header.
+
+Nút bàn phím cố định “💬 Nhắn quản lý” (nhân viên) và “📢 Gửi thông báo” (quản lý, giám đốc) mở đúng luồng thay vì câu tạm.
+
+#### 2.21.7. Quyền
+
+| API | Nhân viên | Quản lý | Giám đốc |
+|---|---|---|---|
+| Gửi thông báo tới nhân viên | – | ✓ | ✓ |
+| Gửi thông báo tới quản lý | – | – | ✓ |
+| Xem thông báo của người khác | – | chỉ của mình | ✓ tất cả |
+| Hộp thư kênh Quản lý (đọc / trả lời) | – | ✓ / ✓ | ✓ / – |
+| Hộp thư kênh Giám đốc (đọc / trả lời) | – | – | ✓ / ✓ |
