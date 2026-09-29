@@ -204,6 +204,13 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("GET", f"/api/reports/products?period=day&date={NOW.date()}", {"director"}, None),
         ("GET", f"/api/reports/timeseries?period=day&date={NOW.date()}", {"director"}, None),
         ("GET", "/api/reports/employees", {"director"}, None),
+        ("GET", "/api/announcements", set(ROLES), None),
+        ("POST", "/api/announcements", {"manager", "director"}, {"body": "Thông báo", "audience_type": "employees"}),
+        ("GET", "/api/conversations?channel=manager", {"manager", "director"}, None),
+        ("GET", "/api/conversations?channel=director", {"director"}, None),
+        ("GET", "/api/conversations/1/messages", {"manager", "director"}, None),
+        ("POST", "/api/conversations/1/messages", {"manager", "director"}, {"body": "Trả lời"}),
+        ("POST", "/api/announcements/1/ack", {"employee", "manager", "director"}, None),
     ]
 
 
@@ -249,7 +256,9 @@ async def test_permission_table_covers_all_api_routes(permission_context):
         table_normalized.add((method, path.split("?", 1)[0]
                               .replace("111", "{employee_id}")
                               .replace("114", "{employee_id}")
-                              .replace("222", "{session_id}")
+                                  .replace("222", "{session_id}")
+                                  .replace("/conversations/1/", "/conversations/{conversation_id}/")
+                                  .replace("/announcements/1/ack", "/announcements/{announcement_id}/ack")
                                   .replace("333", "{location_id}")
                                   .replace("/rates/1/cancel", "/rates/{rate_id}/cancel")))
     assert actual == table_normalized

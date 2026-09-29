@@ -48,6 +48,7 @@ export type MockScenario =
   | "manager_locations"
   | "manager_locations_in_use"
   | "manager_lock_open"
+  | "manager_messages"
   | "director_report_day"
   | "director_report_week"
   | "director_report_month"
@@ -56,7 +57,8 @@ export type MockScenario =
   | "director_report_empty"
   | "director_review"
   | "director_payroll"
-  | "director_payroll_detail";
+  | "director_payroll_detail"
+  | "director_messages";
 
 export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "idle", label: "Chưa vào ca"},
@@ -93,6 +95,7 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "manager_locations", label: "QL: Kho"},
   {key: "manager_locations_in_use", label: "QL: Kho bị chặn ngừng dùng"},
   {key: "manager_lock_open", label: "QL: Khóa đang trong ca"},
+  {key: "manager_messages", label: "QL: Tin nhắn"},
   {key: "director_report_day", label: "GĐ: Báo cáo ngày"},
   {key: "director_report_week", label: "GĐ: Báo cáo tuần"},
   {key: "director_report_month", label: "GĐ: Báo cáo tháng"},
@@ -102,6 +105,7 @@ export const mockScenarios: Array<{key: MockScenario; label: string}> = [
   {key: "director_review", label: "GĐ: Cần xử lý"},
   {key: "director_payroll", label: "GĐ: Duyệt lương"},
   {key: "director_payroll_detail", label: "GĐ: Chi tiết lương"},
+  {key: "director_messages", label: "GĐ: Tin nhắn"},
 ];
 
 export const mockEmployee: Employee = {
@@ -118,7 +122,7 @@ export const mockManager: Employee = {
   code: "QL001",
   full_name: "Quản lý CRV",
   role: "manager",
-  tabs: ["working", "review", "payroll", "employees"],
+  tabs: ["working", "review", "payroll", "employees", "messages"],
   has_location_consent: true,
 };
 
@@ -127,7 +131,7 @@ export const mockDirector: Employee = {
   code: "GD001",
   full_name: "Giám đốc CRV",
   role: "director",
-  tabs: ["reports", "review", "payroll"],
+  tabs: ["reports", "review", "payroll", "messages"],
   has_location_consent: true,
 };
 

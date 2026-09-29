@@ -12,6 +12,7 @@
     "screenshots:gd7ab": "node scripts/capture-gd7ab-screenshots.mjs",
     "screenshots:gd7c": "node scripts/capture-gd7c-screenshots.mjs",
     "screenshots:gd7d": "node scripts/capture-gd7d-screenshots.mjs",
+    "screenshots:gd-thong-bao": "node scripts/capture-gd-thong-bao-screenshots.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {

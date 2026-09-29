@@ -246,6 +246,66 @@ class NotificationOutboxOrm(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AnnouncementOrm(Base):
+    __tablename__ = "announcements"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    sender_role: Mapped[str] = mapped_column(String(16))
+    audience_type: Mapped[str] = mapped_column(String(16))
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("work_locations.id"), nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnnouncementRecipientOrm(Base):
+    __tablename__ = "announcement_recipients"
+    __table_args__ = (UniqueConstraint("announcement_id", "employee_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(ForeignKey("announcements.id", ondelete="CASCADE"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ConversationOrm(Base):
+    __tablename__ = "conversations"
+    __table_args__ = (UniqueConstraint("employee_id", "channel"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(16), index=True)
+
+
+class MessageOrm(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    direction: Mapped[str] = mapped_column(String(16))
+    body: Mapped[str] = mapped_column(Text)
+    announcement_id: Mapped[int | None] = mapped_column(ForeignKey("announcements.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_by: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class MessageRelayOrm(Base):
+    __tablename__ = "message_relays"
+    __table_args__ = (UniqueConstraint("chat_id", "telegram_message_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    telegram_message_id: Mapped[int] = mapped_column(Integer)
+
+
+class PendingFreeMessageOrm(Base):
+    __tablename__ = "pending_free_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    telegram_message_id: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class BotHeartbeatOrm(Base):
     __tablename__ = "bot_heartbeat"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)

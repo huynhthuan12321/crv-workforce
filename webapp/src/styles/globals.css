@@ -1280,6 +1280,31 @@ body.keyboard-open .sticky-action {
   transition: transform 0.16s ease, visibility 0.16s ease;
 }
 
+.message-thread {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.message-bubble {
+  max-width: 86%;
+  padding: 10px 12px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--surface-muted);
+  overflow-wrap: anywhere;
+}
+
+.message-bubble--right {
+  justify-self: end;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--accent-soft);
+}
+
+.message-compose {
+  display: grid;
+  gap: 8px;
+}
+
 .search-field {
   display: flex;
   width: 100%;

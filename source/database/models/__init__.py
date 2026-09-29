@@ -7,5 +7,7 @@ __all__ = (
     "LocationConsentOrm", "InviteCodeOrm", "RateHistoryOrm", "ProductOrm",
     "WorkLocationOrm", "EmployeeLocationAssignmentOrm",
     "WorkSessionOrm", "OutputLogOrm", "OutputItemOrm", "PayBatchOrm",
-    "AuditLogOrm", "SyncOutboxOrm", "NotificationOutboxOrm", "BotHeartbeatOrm",
+    "AuditLogOrm", "SyncOutboxOrm", "NotificationOutboxOrm",
+    "AnnouncementOrm", "AnnouncementRecipientOrm", "ConversationOrm",
+    "MessageOrm", "MessageRelayOrm", "PendingFreeMessageOrm", "BotHeartbeatOrm",
 )
