@@ -60,7 +60,24 @@ run_capture "alembic migration check" bash -lc "alembic upgrade head && alembic 
 pushd webapp >/dev/null
 run_capture "npm test" npm test >/dev/null
 run_capture "npm run build" npm run build >/dev/null
+VITE_MOCK=1 npm run dev -- --host 127.0.0.1 --port 4175 >/tmp/crv-workforce-vite.log 2>&1 &
+vite_pid="$!"
+cleanup_vite() {
+  if kill -0 "$vite_pid" >/dev/null 2>&1; then
+    kill "$vite_pid" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_vite EXIT
+for _ in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:4175" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+export CRV_MOCK_URL="http://127.0.0.1:4175"
 run_capture "npm run test:overflow" npm run test:overflow >/dev/null
+cleanup_vite
+trap - EXIT
 popd >/dev/null
 
 echo

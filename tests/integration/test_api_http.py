@@ -144,7 +144,12 @@ async def seed_actor(session, code: str, role: EmployeeRole, telegram_id: int | 
 
 
 async def seed_rate(session, employee_id: int, rate: int = 30_000, day: date = NOW.date()) -> None:
-    session.add(RateHistoryOrm(employee_id=employee_id, hourly_rate=rate, effective_from=day))
+    session.add(RateHistoryOrm(
+        employee_id=employee_id,
+        hourly_rate=rate,
+        effective_from=datetime.combine(day, datetime.min.time(), tzinfo=VIETNAM_TZ),
+        reason="test rate",
+    ))
 
 
 async def seed_consent(session, employee_id: int) -> None:
@@ -282,7 +287,7 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
 
     response = api_client.post(
         "/api/employees",
-        json={"code": "NVHTTP", "full_name": "Nhan vien HTTP", "hourly_rate": 30_000, "effective_from": str(date.today()), "location_id": location_id},
+        json={"code": "NVHTTP", "full_name": "Nhan vien HTTP", "hourly_rate": 30_000, "effective_from": str(NOW.date()), "location_id": location_id},
         headers=manager_headers,
     )
     assert response.status_code == 200, response.text
@@ -296,7 +301,7 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
 
     response = api_client.post(
         f"/api/employees/{managed_employee_id}/rates",
-        json={"hourly_rate": 31_000, "effective_from": str(date.today() + timedelta(days=1))},
+        json={"hourly_rate": 31_000, "mode": "date", "effective_date": str(NOW.date() + timedelta(days=1)), "reason": "Thay đổi công việc"},
         headers=manager_headers,
     )
     assert response.status_code == 200, response.text
@@ -619,11 +624,11 @@ async def test_gd7c_employee_admin_errors_audit_and_rate_conflict(api_client, pg
 
     response = api_client.post(
         f"/api/employees/{employee_id}/rates",
-        json={"hourly_rate": 29_000, "effective_from": str(NOW.date())},
+        json={"hourly_rate": 29_000, "mode": "date", "effective_date": str(NOW.date()), "reason": "Thay đổi công việc"},
         headers=headers,
     )
-    assert response.status_code == 409
-    assert response.json()["code"] == "RATE_DATE_EXISTS"
+    assert response.status_code == 422
+    assert response.json()["code"] == "RATE_IN_PAST"
 
     response = api_client.post(f"/api/employees/{employee_id}/lock", headers=headers)
     assert response.status_code == 200, response.text
@@ -705,12 +710,13 @@ async def test_duplicate_employee_and_rate_return_409_not_500(api_client, pg_fac
             manager = await seed_actor(session, "QLDUP2", EmployeeRole.manager, 8301)
             employee = await seed_actor(session, "NVDUP", EmployeeRole.employee, 8302)
             await seed_rate(session, employee.id)
+            location_id = (await session.scalar(select(WorkLocationOrm.id).where(WorkLocationOrm.code == "KHO01")))
             manager_id, employee_id = manager.id, employee.id
 
     headers = auth_headers(manager_id)
     duplicate_employee = api_client.post(
         "/api/employees",
-        json={"code": "NVDUP", "full_name": "Trùng mã", "hourly_rate": 30000, "effective_from": str(date.today())},
+        json={"code": "NVDUP", "full_name": "Trùng mã", "hourly_rate": 30000, "effective_from": str(NOW.date()), "location_id": location_id},
         headers=headers,
     )
     assert duplicate_employee.status_code == 409, duplicate_employee.text
@@ -718,11 +724,11 @@ async def test_duplicate_employee_and_rate_return_409_not_500(api_client, pg_fac
 
     duplicate_rate = api_client.post(
         f"/api/employees/{employee_id}/rates",
-        json={"hourly_rate": 31000, "effective_from": str(NOW.date())},
+        json={"hourly_rate": 31000, "mode": "date", "effective_date": str(NOW.date()), "reason": "Thay đổi công việc"},
         headers=headers,
     )
-    assert duplicate_rate.status_code == 409, duplicate_rate.text
-    assert duplicate_rate.json()["code"] == "RATE_DATE_EXISTS"
+    assert duplicate_rate.status_code == 422, duplicate_rate.text
+    assert duplicate_rate.json()["code"] == "RATE_IN_PAST"
 
 
 async def test_employee_location_assignment_history_and_required_location(api_client, pg_factory):
@@ -758,7 +764,7 @@ async def test_employee_location_assignment_history_and_required_location(api_cl
 
     missing_location = api_client.post(
         "/api/employees",
-        json={"code": "NVNEW1", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(date.today())},
+        json={"code": "NVNEW1", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(NOW.date())},
         headers=headers,
     )
     assert missing_location.status_code == 422
@@ -766,7 +772,7 @@ async def test_employee_location_assignment_history_and_required_location(api_cl
 
     inactive_location = api_client.post(
         "/api/employees",
-        json={"code": "NVNEW2", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(date.today()), "location_id": inactive_id},
+        json={"code": "NVNEW2", "full_name": "Nhan vien moi", "hourly_rate": 30000, "effective_from": str(NOW.date()), "location_id": inactive_id},
         headers=headers,
     )
     assert inactive_location.status_code == 409
@@ -828,8 +834,8 @@ async def test_post_patch_bad_or_duplicate_inputs_do_not_return_500(api_client, 
     headers = auth_headers(manager_id)
     cases = [
         ("POST", "/api/locations", {"name": "Thiếu mã"}),
-        ("POST", "/api/employees", {"code": "NVNO500", "full_name": "Trùng", "hourly_rate": 30000, "effective_from": str(date.today())}),
-        ("POST", f"/api/employees/{employee_id}/rates", {"hourly_rate": 31000, "effective_from": str(NOW.date())}),
+        ("POST", "/api/employees", {"code": "NVNO500", "full_name": "Trùng", "hourly_rate": 30000, "effective_from": str(NOW.date())}),
+        ("POST", f"/api/employees/{employee_id}/rates", {"hourly_rate": 31000, "mode": "date", "effective_date": str(NOW.date()), "reason": "Thay đổi công việc"}),
         ("POST", f"/api/review/999999/close", {"check_out_time": "2026-04-24T09:00:00+07:00", "reason": "không tồn tại"}),
         ("PATCH", f"/api/review/999999", {"check_in_time": "2026-04-24T08:00:00+07:00", "check_out_time": "2026-04-24T09:00:00+07:00", "reason": "không tồn tại"}),
     ]

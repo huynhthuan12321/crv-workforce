@@ -59,6 +59,9 @@ def notification_text(row: NotificationOutboxOrm) -> str:
         "forgot_session_closed": f"Phiên ngày {p.get('work_date')} đã được đóng lúc {p.get('closed_time')}. Bạn có 10 phút để khai sản lượng.",
         "batch_paid": f"Đã duyệt lương đợt {p.get('batch_no')} ngày {p.get('date')}: {fmt_money_vn(p.get('amount', 0))}. Tổng đã nhận hôm nay: {fmt_money_vn(p.get('paid_total', 0))}.",
         "consent_withdrawn": f"{p.get('employee_name')} đã rút lại đồng ý thu thập vị trí.",
+        "rate_changed": f"Đơn giá của bạn đã được cập nhật.\nMức mới: {fmt_money_vn(p.get('hourly_rate', 0))}/giờ\nÁp dụng từ lần vào ca tiếp theo.",
+        "rate_scheduled": f"Đơn giá của bạn sẽ được cập nhật.\nMức mới: {fmt_money_vn(p.get('hourly_rate', 0))}/giờ\nCó hiệu lực từ {p.get('effective_from')}.",
+        "rate_cancelled": f"Thay đổi đơn giá dự kiến từ {p.get('effective_from')} đã được hủy. Đơn giá hiện tại của bạn vẫn là {fmt_money_vn(p.get('current_hourly_rate', 0))}/giờ.",
     }
     return messages.get(row.notification_type, p.get("text", "Thông báo từ CRV Workforce"))
 
