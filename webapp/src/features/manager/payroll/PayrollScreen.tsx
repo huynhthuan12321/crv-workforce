@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useState, type ReactNode} from "react";
 import {ApiError, api} from "../../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../components/ui";
-import {fmtDateLong, fmtTime, todayVN} from "../../../lib/date-vn";
+import {fmtDateLong, fmtDuration, fmtTime, todayVN} from "../../../lib/date-vn";
 import {fmtMoney} from "../../../lib/format";
 import {gpsLabel} from "../../../lib/gps-label";
 import {hapticNotify} from "../../../lib/haptic";
@@ -33,6 +33,16 @@ export function payrollStatusText(row: PayrollSummary): string {
   if (row.blocked_amount > 0) return "Cần xem lại vị trí";
   if (payrollDone(row)) return "Đã trả hết";
   return "Chưa đủ điều kiện";
+}
+
+function rateSummaryText(row: PayrollSummary): string {
+  const rates = row.rate_snapshots ?? [];
+  if (rates.length >= 2) {
+    return `${fmtDuration(row.closed_minutes)} · ${rates.length} mức đơn giá (${fmtMoney(rates[0])} → ${fmtMoney(rates[rates.length - 1])}/giờ)`;
+  }
+  if (row.hourly_rate) return `Đơn giá ${fmtMoney(row.hourly_rate)}/giờ`;
+  if (rates.length === 1) return `Đơn giá ${fmtMoney(rates[0])}/giờ`;
+  return "Chưa có đơn giá trong ngày";
 }
 
 export function groupPayrollSessions(detail: Pick<PayrollDetail, "sessions" | "eligible_session_ids" | "unreviewed_flag_session_ids" | "needs_review_session_ids">) {
@@ -136,7 +146,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: (sessionId?:
             <div className="manager-row">
               <div>
                 <b>{row.full_name}</b>
-                <small>{row.code} · Đơn giá {fmtMoney(row.hourly_rate ?? 0)}/giờ</small>
+                <small>{row.code} · {rateSummaryText(row)}</small>
               </div>
               {payrollStatusText(row) === "Chưa có phiên" ? (
                 <Chip tone="neutral">Chưa có phiên</Chip>
@@ -160,7 +170,7 @@ export function PayrollScreen({onOpenReviewGps}: {onOpenReviewGps?: (sessionId?:
               )}
             </div>
             <div className="mini-grid">
-              <Metric label="Chờ duyệt" value={fmtMoney(row.pending_amount)} tone={row.pending_amount ? "warning" : "neutral"} />
+              <Metric label={row.rate_count && row.rate_count > 1 ? "Tạm tính ngày" : "Chờ duyệt"} value={fmtMoney(row.pending_amount)} tone={row.pending_amount ? "warning" : "neutral"} />
               <Metric label="Cần xem lại vị trí" value={fmtMoney(row.blocked_amount)} tone={row.blocked_amount ? "warning" : "neutral"} />
               <Metric label="Đã trả hôm nay" value={fmtMoney(row.paid_amount)} />
             </div>
@@ -286,7 +296,11 @@ function PayrollDetailScreen({employeeId, date, onBack, onOpenReviewGps}: {emplo
 function SessionLine({row, action}: {row: PayrollSession; action?: ReactNode}) {
   return (
     <div className="session-row">
-      <div><b className="session-time">{sessionTime(row)}</b><small>{gpsLabel(row)}</small></div>
+      <div>
+        <b className="session-time">{sessionTime(row)}</b>
+        <small>{fmtMoney(row.rate_snapshot)}/giờ · Phiên {fmtMoney(Math.floor(row.amount_raw ?? 0))}</small>
+        <small>{gpsLabel(row)}</small>
+      </div>
       {action || (row.is_locked ? <Chip tone="success">Đã khóa</Chip> : <Chip tone="warning">Chờ duyệt</Chip>)}
     </div>
   );

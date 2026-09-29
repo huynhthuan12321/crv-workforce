@@ -372,7 +372,7 @@ function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onC
 function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedEmployee | null; onBack: () => void; onChanged: () => void}) {
   const scenario = mockScenario();
   const [rates, setRates] = useState<RateHistory[]>([]);
-  const [rate, setRate] = useState({hourly_rate: 32000, effective_from: todayVN()});
+  const [rate, setRate] = useState({hourly_rate: 32000, mode: "next_shift", effective_date: todayVN(), reason: "Tăng theo năng lực", confirm_large_change: false});
   const [detail, setDetail] = useState<ManagedEmployee | null>(employee);
   const [locations, setLocations] = useState<WorkLocation[]>([]);
   const [history, setHistory] = useState<EmployeeLocationHistory[]>([]);
@@ -382,6 +382,7 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
   const [invite, setInvite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmRate, setConfirmRate] = useState("");
 
   const load = useCallback(async () => {
     if (!employee) return;
@@ -410,8 +411,39 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
 
   const saveRate = async () => {
     setBusy(true);
+    setConfirmRate("");
     try {
-      await api.post(`/employees/${detail.id}/rates`, rate);
+      const payload = {
+        hourly_rate: rate.hourly_rate,
+        mode: rate.mode,
+        effective_date: rate.mode === "date" ? rate.effective_date : undefined,
+        reason: rate.reason.trim(),
+        confirm_large_change: rate.confirm_large_change,
+      };
+      const data = await api.post<{requires_confirmation?: boolean; message?: string} | RateHistory>(`/employees/${detail.id}/rates`, payload);
+      if ("requires_confirmation" in data && data.requires_confirmation) {
+        setConfirmRate(data.message || "Thay đổi lớn, vui lòng xác nhận lần nữa.");
+        setRate({...rate, confirm_large_change: true});
+        return;
+      }
+      hapticNotify("success");
+      setRate({...rate, confirm_large_change: false});
+      await load();
+      onChanged();
+    } catch (err) {
+      hapticNotify("error");
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelRate = async (item: RateHistory) => {
+    const reason = window.prompt("Nhập lý do hủy mức hẹn", "Hủy theo yêu cầu");
+    if (!reason || reason.trim().length < 5) return;
+    setBusy(true);
+    try {
+      await api.post(`/employees/${detail.id}/rates/${item.id}/cancel`, {reason});
       hapticNotify("success");
       await load();
       onChanged();
@@ -487,17 +519,39 @@ function EmployeeDetailScreen({employee, onBack, onChanged}: {employee: ManagedE
             <Button className="small-button" tone="secondary" onClick={() => setAssigning(true)}>Đổi kho</Button>
           </div>
         </div>
-        <Metric label="Đơn giá hiện tại" value={`${fmtMoney(detail.current_hourly_rate ?? 0)}/giờ`} />
-        <SectionTitle title="Thiết lập đơn giá giờ" />
-        <div className="two-col">
-          <label className="form-field">Nhập đơn giá (giờ)<input type="number" value={rate.hourly_rate} onChange={(event) => setRate({...rate, hourly_rate: Number(event.target.value)})} /></label>
-          <label className="form-field">Hiệu lực từ ngày<input type="date" min={todayVN()} value={rate.effective_from} onChange={(event) => setRate({...rate, effective_from: event.target.value})} /><small className="date-label">{new Intl.DateTimeFormat("vi-VN", {timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric"}).format(new Date(`${rate.effective_from}T12:00:00+07:00`))}</small></label>
+        <Metric label={`Đơn giá hiện tại${detail.current_rate_effective_from ? ` · Hiệu lực từ ${fmtDateTime(detail.current_rate_effective_from)}` : ""}`} value={`${fmtMoney(detail.current_hourly_rate ?? 0)}/giờ`} />
+        {detail.pending_rate && (
+          <div className="history-block history-block--pending">
+            <div className="manager-row">
+              <div>
+                <b>Mức hẹn</b>
+                <small>Từ {fmtDateTime(detail.pending_rate.effective_from)} · {fmtMoney(detail.pending_rate.hourly_rate)}/giờ</small>
+              </div>
+              <Button className="small-button" tone="secondary" busy={busy} onClick={() => void cancelRate(detail.pending_rate as RateHistory)}>Hủy</Button>
+            </div>
+          </div>
+        )}
+        <SectionTitle title="Điều chỉnh đơn giá" />
+        <p className="muted">Phiên đang làm hiện tại không bị thay đổi đơn giá.</p>
+        <label className="form-field">Mức mới (đ/giờ)<input type="number" value={rate.hourly_rate} onChange={(event) => setRate({...rate, hourly_rate: Number(event.target.value), confirm_large_change: false})} /></label>
+        <div className="choice-row">
+          <label><input type="radio" checked={rate.mode === "next_shift"} onChange={() => setRate({...rate, mode: "next_shift", confirm_large_change: false})} /> Từ lần vào ca tiếp theo</label>
+          <label><input type="radio" checked={rate.mode === "date"} onChange={() => setRate({...rate, mode: "date", confirm_large_change: false})} /> Từ ngày…</label>
         </div>
+        {rate.mode === "date" && <label className="form-field">Ngày hiệu lực<input type="date" min={todayVN(new Date(Date.now() + 86400000))} value={rate.effective_date} onChange={(event) => setRate({...rate, effective_date: event.target.value, confirm_large_change: false})} /><small className="date-label">Có hiệu lực với các phiên bắt đầu từ ngày {new Intl.DateTimeFormat("vi-VN", {timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric"}).format(new Date(`${rate.effective_date}T12:00:00+07:00`))}</small></label>}
+        <label className="form-field">Lý do nhanh<select value={rate.reason} onChange={(event) => setRate({...rate, reason: event.target.value, confirm_large_change: false})}>{["Tăng theo năng lực", "Điều chỉnh nhiệm vụ", "Thay đổi công việc", "Điều chỉnh tạm thời", "Khác"].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="form-field">Lý do chi tiết<textarea maxLength={200} value={rate.reason} onChange={(event) => setRate({...rate, reason: event.target.value, confirm_large_change: false})} /></label>
+        {confirmRate && <div className="confirm-box"><b>Xác nhận thay đổi lớn</b><p>{confirmRate}</p></div>}
         {error && <p className="form-error">{error}</p>}
-        <Button busy={busy} onClick={saveRate}>Lưu đơn giá</Button>
+        <Button busy={busy} disabled={rate.reason.trim().length < 5} onClick={saveRate}>{rate.confirm_large_change ? "Xác nhận điều chỉnh" : "Lưu đơn giá"}</Button>
         <div className="history-block">
           <b>Lịch sử đơn giá</b>
-          {rates.map((item) => <div className="session-row" key={item.id}><span>{fmtMoney(item.hourly_rate)}/giờ</span><small>Từ {fmtDate(`${item.effective_from}T12:00:00+07:00`)}</small></div>)}
+          {rates.map((item) => <div className="session-row" key={item.id}>
+            <span>{fmtMoney(item.hourly_rate)}/giờ</span>
+            <small>Từ {fmtDateTime(item.effective_from)}</small>
+            {item.reason && <small>Lý do: {item.reason}</small>}
+            {item.is_cancelled && <Chip tone="neutral">Đã hủy</Chip>}
+          </div>)}
         </div>
         <div className="history-block">
           <button className="plain-button" onClick={() => setShowHistory(!showHistory)}><b>Lịch sử kho</b><small>{showHistory ? "Thu gọn" : "Mở rộng"}</small></button>

@@ -126,10 +126,12 @@ class MockApi {
     ] as T;
     if (path.startsWith("/payroll/1")) return mockPayrollADetail as T;
     if (path.startsWith("/payroll")) return (this.scenario === "manager_payroll_empty" ? [] : this.scenario === "manager_payroll_real_phone" ? mockPayrollRealPhone : mockPayroll) as T;
-    if (path.startsWith("/employees/1/rates") && options.method === "POST") return {id: 9, hourly_rate: 32000, effective_from: "2024-04-25"} as T;
+    if (path.startsWith("/employees/1/rates/") && path.endsWith("/cancel") && options.method === "POST") return {id: 9, hourly_rate: 40000, effective_from: "2026-11-01T00:00:00+07:00", reason: "Thay đổi công việc", cancelled_at: "2026-09-29T09:00:00+07:00", is_cancelled: true} as T;
+    if (path.startsWith("/employees/1/rates") && options.method === "POST") return {id: 12, hourly_rate: 32000, effective_from: "2026-09-29T09:00:00+07:00", reason: "Tăng theo năng lực", is_pending: false} as T;
     if (path.startsWith("/employees/1/rates")) return [
-      {id: 1, hourly_rate: 30000, effective_from: "2024-04-24"},
-      {id: 2, hourly_rate: 28000, effective_from: "2024-01-01"},
+      {id: 9, hourly_rate: 40000, effective_from: "2026-11-01T00:00:00+07:00", reason: "Thay đổi công việc", is_pending: true},
+      {id: 1, hourly_rate: 30000, effective_from: "2026-09-27T08:00:00+07:00", reason: "Đơn giá ban đầu"},
+      {id: 2, hourly_rate: 28000, effective_from: "2024-01-01T00:00:00+07:00", reason: "Dữ liệu trước nâng cấp", cancelled_at: "2026-09-01T09:00:00+07:00", is_cancelled: true},
     ] as T;
     if (path.startsWith("/employees/") && path.endsWith("/location-history")) return mockEmployeeLocationHistory as T;
     if (path.startsWith("/employees/1/invite") && options.method === "POST") return {...mockEmployees[0], invite_url: "https://t.me/crv_bot/app?startapp=invite-new"} as T;

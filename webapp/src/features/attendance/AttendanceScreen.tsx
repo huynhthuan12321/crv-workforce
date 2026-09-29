@@ -1,8 +1,8 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiError, api} from "../../api/client";
 import {Button, Card, Chip, Metric, ScreenState} from "../../components/ui";
-import {elapsedMinutes, elapsedSeconds, temporarySalary} from "../../lib/clock";
-import {fmtClock, fmtDateLong, fmtDuration} from "../../lib/date-vn";
+import {elapsedMinutes, elapsedSeconds} from "../../lib/clock";
+import {fmtClock, fmtDate, fmtDateLong, fmtDuration} from "../../lib/date-vn";
 import {fmtMoney} from "../../lib/format";
 import {gpsLabel} from "../../lib/gps-label";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
@@ -87,7 +87,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
 
   const open = today?.open_session ?? null;
   const minutes = open ? elapsedMinutes(open.check_in_at, now) : 0;
-  const salary = open ? temporarySalary(minutes, open.rate_snapshot) : today?.estimated_day_amount ?? 0;
+  const dayEstimate = today?.estimated_day_amount ?? 0;
   const afterCutoff = !open && today ? !today.can_check_in : false;
   const gps = gpsText(open);
 
@@ -150,10 +150,11 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
             <strong>{elapsed}</strong>
           </div>
           <div className="money-block">
-            <small>Lương tạm tính hôm nay</small>
-            <span>{fmtMoney(salary)}</span>
-            <p>({minutes} phút × {fmtMoney(open.rate_snapshot)}/giờ)</p>
+            <small>Tạm tính hôm nay</small>
+            <span>{fmtMoney(dayEstimate)}</span>
+            <p>Ca này: {minutes} phút × {fmtMoney(open.rate_snapshot)}/giờ</p>
           </div>
+          {today.pending_rate && <p className="muted">Từ {fmtDate(today.pending_rate.effective_from, {day: "2-digit", month: "2-digit", year: "numeric"})}: {fmtMoney(today.pending_rate.hourly_rate)}/giờ</p>}
           <div className="mini-grid">
             <Metric label="Thời lượng" value={fmtDuration(minutes)} />
             <Metric label="Đã trả hôm nay" value={fmtMoney(today.paid_today)} tone="success" />
@@ -187,6 +188,7 @@ export function AttendanceScreen({onNeedConsent, onCheckedOut}: {onNeedConsent: 
         </div>
         <h2 className="hero-card__headline">{afterCutoff ? `Đã qua ${today.checkin_cutoff}` : "Sẵn sàng làm việc!"}</h2>
         {today.work_location && <p className="location-note">Kho hôm nay: <b>{today.work_location.code} · {today.work_location.name}</b></p>}
+        {today.pending_rate && <p className="location-note">Từ {fmtDate(today.pending_rate.effective_from, {day: "2-digit", month: "2-digit", year: "numeric"})}: <b>{fmtMoney(today.pending_rate.hourly_rate)}/giờ</b></p>}
         <p className="muted">{afterCutoff ? `Không thể vào ca từ ${today.checkin_cutoff}. Vui lòng quay lại vào ngày mai.` : "Nhấn VÀO CA khi bắt đầu làm việc. Ứng dụng sẽ lấy vị trí của bạn tại thời điểm này."}</p>
         {error && <p className="form-error">{error}</p>}
         <button
