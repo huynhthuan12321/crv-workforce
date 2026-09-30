@@ -53,19 +53,10 @@
 ### 2.6. Sản lượng
 
 - Chỉ để **theo dõi**, không ảnh hưởng lương.
-- Mỗi phiên có một bản khai gồm 7 mặt hàng, khai theo **túi** (số nguyên ≥ 0), hệ thống tự quy ra kg:
-
-| Mặt hàng | kg/túi |
-|---|---|
-| Bột | 1,2 |
-| Xúc xích | 1 |
-| Phô mai | 1 |
-| Chà bông | 1 |
-| Sốt cam | 2 |
-| Sốt trắng | 2 |
-| Bơ | 2 |
-
-- Bảng quy đổi theo danh mục sản phẩm ở 2.20 (không cố định; mỗi dòng sản lượng lưu snapshot mã, tên, đơn vị, quy cách, thứ tự).
+- Mỗi phiên có một bản khai theo **danh mục sản phẩm đã chốt tại thời điểm phiên đóng** (SPEC 2.20). Danh mục có thể gồm sản phẩm chung, sản phẩm theo kho hoặc sản phẩm riêng nhân viên.
+- V1 chỉ hỗ trợ đơn vị đếm nguyên (mặc định `Túi`); số lượng là số nguyên ≥ 0, hệ thống tự quy ra kg bằng snapshot quy cách của từng dòng sản lượng.
+- 7 sản phẩm mặc định (Bột, Xúc xích, Phô mai, Chà bông, Sốt cam, Sốt trắng, Bơ) chỉ là dữ liệu seed khi bảng sản phẩm rỗng, không phải bảng quy đổi cố định.
+- Mỗi dòng sản lượng lưu snapshot mã, tên, đơn vị, quy cách, thứ tự và tổng kg; không diễn giải lại lịch sử từ danh mục hiện tại.
 - Nhân viên được sửa bản khai trong **10 phút kể từ thời điểm phiên được đóng**:
   - Nhân viên tự ra ca → 10 phút kể từ lúc bấm Ra ca.
   - Phiên quên ra ca do quản lý/giám đốc đóng → 10 phút kể từ lúc quản lý/giám đốc xử lý xong; bot nhắn nhân viên vào khai sản lượng ngay khi phiên được đóng.
@@ -127,9 +118,9 @@ Gồm hai loại:
 - Lọc theo ngày / tuần / tháng và theo nhân viên.
 - Lọc theo kho:
   - "Tất cả kho": dùng đúng số liệu Đã trả / Chờ duyệt / Cần xử lý trước / Tổng đã làm tròn theo ngày như trên.
-  - Một kho cụ thể: giờ công, túi, kg tính chính xác theo phiên thuộc kho đó; lương hiển thị là **Chi phí theo phiên (chưa làm tròn)** = tổng `amount_raw` của các phiên tại kho đó, kèm ghi chú rằng lương làm tròn theo ngày nên tổng các kho có thể lệch vài nghìn đồng so với "Tất cả kho".
-- Chỉ số: tổng giờ công, tổng lương (đã trả + chờ duyệt + cần xử lý trước), tổng túi, tổng kg.
-- Biểu đồ giờ công theo thời gian. Bảng sản lượng theo mặt hàng.
+  - Một kho cụ thể: giờ công, số lượng, kg tính chính xác theo phiên thuộc kho đó; lương hiển thị là **Chi phí theo phiên (chưa làm tròn)** = tổng `amount_raw` của các phiên tại kho đó, kèm ghi chú rằng lương làm tròn theo ngày nên tổng các kho có thể lệch vài nghìn đồng so với "Tất cả kho".
+- Chỉ số: tổng giờ công, tổng lương (đã trả + chờ duyệt + cần xử lý trước), tổng số lượng theo đơn vị sản phẩm, tổng kg, và số **phiên chưa khai sản lượng** theo 2.20.
+- Biểu đồ giờ công theo thời gian. Bảng sản lượng theo mặt hàng gom theo snapshot sản phẩm; chỉ cộng bản khai `submitted`, sản phẩm ngừng sản xuất vẫn hiện nếu kỳ có dữ liệu, sản phẩm đã xóa không hiện.
 
 ### 2.13. Dữ liệu cá nhân
 
@@ -143,7 +134,7 @@ Gồm hai loại:
 ### 2.14. Đồng bộ Lark
 
 - Khi có phiên đóng, phiên được sửa, bản khai sản lượng, hoặc đợt thanh toán mới → ghi một bản ghi vào bảng outbox **trong cùng transaction** với thay đổi nghiệp vụ. Transaction lỗi thì cả hai cùng không được ghi.
-- Payload outbox/Lark dùng `schema_version = 2`, cấu trúc lồng có `employee`, `location`/`locations`, `session`/`sessions`; `event_id` là khóa idempotency duy nhất và phải giữ nguyên khi retry.
+- Payload outbox/Lark mặc định dùng `schema_version = 2`, cấu trúc lồng có `employee`, `location`/`locations`, `session`/`sessions`; riêng `output_submitted` dùng `schema_version = 3` và gửi snapshot sản phẩm theo 2.20. `event_id` là khóa idempotency duy nhất và phải giữ nguyên khi retry.
 - Tiến trình nền trong service bot gửi bản ghi outbox tới webhook n8n (kèm chữ ký HMAC), thử lại khi lỗi.
 
 ### 2.15. Đăng nhập và phiên làm việc
