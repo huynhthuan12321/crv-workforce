@@ -9,7 +9,7 @@ from source.api.middlewares import LoggingMiddleware
 from source.api.middlewares import RateLimitMiddleware
 from source.api.routes import auth
 from source.api.routes import health
-from source.api.routes import attendance, client_errors, consent, employees, history, locations, messaging, outputs, payroll, reports, review, working
+from source.api.routes import attendance, catalog, client_errors, consent, employees, history, locations, messaging, outputs, payroll, reports, review, working
 from source.config import settings
 from source.constants import API_DOCS_URL
 from source.constants import API_PREFIX
@@ -46,6 +46,13 @@ FIELD_LABELS = {
     "lat": "Vĩ độ",
     "lng": "Kinh độ",
     "accuracy_m": "Độ chính xác vị trí",
+    "kg_per_unit": "Quy cách kg/đơn vị",
+    "unit_code": "Mã đơn vị",
+    "unit_label": "Tên đơn vị",
+    "sort_order": "Thứ tự",
+    "scope": "Phạm vi áp dụng",
+    "location_ids": "Danh sách kho",
+    "employee_ids": "Danh sách nhân viên",
 }
 
 
@@ -117,6 +124,7 @@ def setup_api(app: FastAPI) -> None:
     app.include_router(payroll.router, prefix=f"{API_PREFIX}/payroll", tags=["Payroll"])
     app.include_router(employees.router, prefix=f"{API_PREFIX}/employees", tags=["Employees"])
     app.include_router(locations.router, prefix=f"{API_PREFIX}/locations", tags=["Locations"])
+    app.include_router(catalog.router, prefix=f"{API_PREFIX}/catalog", tags=["Catalog"])
     app.include_router(reports.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])
     app.include_router(messaging.router, prefix=API_PREFIX, tags=["Messaging"])
 

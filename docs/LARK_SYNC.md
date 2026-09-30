@@ -33,7 +33,7 @@ worker gửi event E tới n8n
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "event_id": "uuid",
   "event_type": "session_closed",
   "occurred_at": "2026-09-26T11:35:00+07:00",
@@ -118,17 +118,23 @@ Giống `session_closed`, bổ sung thông tin thay đổi:
   "employee": {"id": 1, "code": "NV001", "name": "Nguyễn Văn A"},
   "location": {"id": 1, "code": "KHO01", "name": "Xưởng chính"},
   "session": {"id": 123},
-  "items": {
-    "BOT": 5,
-    "XUC_XICH": 3,
-    "PHO_MAI": 2,
-    "CHA_BONG": 1,
-    "SOT_CAM": 1,
-    "SOT_TRANG": 0,
-    "BO": 0
-  }
+  "items": [
+    {
+      "product_id": 1,
+      "product_code": "BOT",
+      "product_name": "Bột",
+      "unit": "Túi",
+      "unit_code": "BAG",
+      "quantity": 5,
+      "kg_per_unit": 1.2,
+      "total_kg": 6.0,
+      "sort_order": 1
+    }
+  ]
 }
 ```
+
+`output_submitted` chỉ phát khi nhân viên bấm **Xác nhận sản lượng** (`output_logs.status = submitted`). Payload luôn dùng snapshot trong `output_items`; n8n/Lark không được đọc lại danh mục sản phẩm hiện tại để diễn giải lịch sử.
 
 ## Cột đề xuất cho Lark Base
 

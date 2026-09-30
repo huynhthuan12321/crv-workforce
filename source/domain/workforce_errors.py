@@ -55,6 +55,15 @@ MESSAGES = {
     "LOCATION_NAME_EXISTS": "Tên kho đã tồn tại.",
     "FREE_MESSAGE_EXPIRED": "Tin nhắn đã hết hạn.",
     "RECIPIENT_UNAVAILABLE": "Chưa có người nhận phù hợp.",
+    "PRODUCT_NOT_FOUND": "Không tìm thấy sản phẩm.",
+    "PRODUCT_CODE_EXISTS": "Mã sản phẩm đã tồn tại.",
+    "PRODUCT_NAME_EXISTS": "Tên sản phẩm đã tồn tại.",
+    "PRODUCT_INVALID": "Dữ liệu sản phẩm không hợp lệ.",
+    "PRODUCT_IN_USE": "Sản phẩm đã từng được sử dụng, chỉ được ngừng sản xuất.",
+    "PRODUCT_NOT_IN_SESSION": "Sản phẩm không thuộc danh mục đã chốt của phiên này.",
+    "OUTPUT_NOT_SUBMITTED": "Phiên chưa khai sản lượng.",
+    "SESSION_NOT_CLOSED": "Phiên chưa được đóng.",
+    "OUTPUT_INVALID": "Số liệu sản lượng không hợp lệ.",
 }
 
 

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime,
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Computed, Date, DateTime,
     Enum, ForeignKey, Index, Integer, JSON, Numeric, String, Text,
     UniqueConstraint, func, text)
 from sqlalchemy.dialects.postgresql import ExcludeConstraint, JSONB
@@ -77,13 +77,44 @@ class RateHistoryOrm(Base):
     cancel_reason: Mapped[str | None] = mapped_column(Text)
 
 
-class ProductOrm(Base):
+class ProductOrm(Base, TimestampMixin):
     __tablename__ = "products"
+    __table_args__ = (
+        CheckConstraint("kg_per_unit >= 0.001 AND kg_per_unit <= 1000", name="ck_products_kg_per_unit"),
+        CheckConstraint("scope IN ('all', 'restricted')", name="ck_products_scope"),
+        Index("uq_products_name_active", "name", unique=True,
+              postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")),
+        Index("ix_products_is_active", "is_active"),
+        Index("ix_products_scope", "scope"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(100))
-    kg_per_bag: Mapped[Decimal] = mapped_column(Numeric(6, 2))
+    unit_code: Mapped[str] = mapped_column(String(16), default="BAG", server_default=text("'BAG'"))
+    unit_label: Mapped[str] = mapped_column(String(32), default="Túi", server_default=text("'Túi'"))
+    kg_per_unit: Mapped[Decimal] = mapped_column(Numeric(10, 3))
     sort_order: Mapped[int] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    scope: Mapped[str] = mapped_column(String(16), default="all", server_default=text("'all'"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+
+
+class ProductLocationScopeOrm(Base):
+    __tablename__ = "product_location_scopes"
+    __table_args__ = (UniqueConstraint("product_id", "location_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("work_locations.id"), index=True)
+
+
+class ProductEmployeeScopeOrm(Base):
+    __tablename__ = "product_employee_scopes"
+    __table_args__ = (UniqueConstraint("product_id", "employee_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
 
 
 class WorkLocationOrm(Base, TimestampMixin):
@@ -175,20 +206,38 @@ class WorkSessionOrm(Base, TimestampMixin):
 
 class OutputLogOrm(Base, TimestampMixin):
     __tablename__ = "output_logs"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'submitted', 'locked_unsubmitted')", name="ck_output_logs_status"),
+        Index("ix_output_logs_status", "status"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     work_session_id: Mapped[int] = mapped_column(ForeignKey("work_sessions.id", ondelete="CASCADE"), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending", server_default=text("'pending'"))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class OutputItemOrm(Base):
     __tablename__ = "output_items"
-    __table_args__ = (UniqueConstraint("output_log_id", "product_id"), CheckConstraint("bags >= 0"))
+    __table_args__ = (
+        UniqueConstraint("output_log_id", "product_id"),
+        CheckConstraint("quantity >= 0", name="ck_output_items_quantity"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     output_log_id: Mapped[int] = mapped_column(ForeignKey("output_logs.id", ondelete="CASCADE"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
-    bags: Mapped[int] = mapped_column(Integer)
-    kg: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    product_code_snapshot: Mapped[str] = mapped_column(String(32))
+    product_name_snapshot: Mapped[str] = mapped_column(String(100))
+    unit_code_snapshot: Mapped[str] = mapped_column(String(16), default="BAG")
+    unit_label_snapshot: Mapped[str] = mapped_column(String(32), default="Túi")
+    kg_per_unit_snapshot: Mapped[Decimal] = mapped_column(Numeric(10, 3))
+    sort_order_snapshot: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[int] = mapped_column(Integer)
+    total_kg: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3),
+        Computed("quantity * kg_per_unit_snapshot", persisted=True),
+    )
 
 
 class PayBatchOrm(Base):

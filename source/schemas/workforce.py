@@ -199,13 +199,57 @@ class OutputSubmitOut(BaseModel):
     session_id: int
     total_kg: float
     locked_at: str | None
+    status: str | None = None
 
 
 class ProductTotalOut(BaseModel):
     code: str
     name: str
-    bags: int
-    kg: float
+    bags: int = 0
+    kg: float = 0
+    quantity: int | None = None
+    total_kg: float | None = None
+    unit_code: str | None = None
+    unit_label: str | None = None
+    kg_per_unit: float | None = None
+    is_active: bool | None = None
+    spec_count: int | None = None
+    spec_warning: str | None = None
+
+
+class ProductScopeOut(BaseModel):
+    scope: str
+    location_ids: list[int] = []
+    employee_ids: list[int] = []
+    location_count: int = 0
+    employee_count: int = 0
+    applied_employee_count: int = 0
+
+
+class CatalogProductOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    unit_code: str
+    unit_label: str
+    kg_per_unit: float
+    sort_order: int
+    is_active: bool
+    scope: str
+    deleted_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    scope_summary: ProductScopeOut
+    used: bool = False
+
+
+class CatalogEmployeeOptionOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    location_id: int | None = None
+    location_name: str | None = None
+    is_active: bool
 
 
 class ReportEmployeeOut(BaseModel):
@@ -228,6 +272,7 @@ class ReportSummaryOut(BaseModel):
     total: int
     bags: int
     kg: float
+    unsubmitted_output_count: int = 0
 
 
 class ReportTimeseriesOut(BaseModel):

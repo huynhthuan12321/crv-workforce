@@ -55,10 +55,15 @@ async def upsert_products(session: AsyncSession) -> None:
         row = await session.scalar(select(ProductOrm).where(ProductOrm.code == code))
         if row:
             row.name = name
-            row.kg_per_bag = kg
+            row.kg_per_unit = kg
             row.sort_order = sort_order
+            row.unit_code = row.unit_code or "BAG"
+            row.unit_label = row.unit_label or "Túi"
+            row.scope = row.scope or "all"
+            row.is_active = True
         else:
-            session.add(ProductOrm(code=code, name=name, kg_per_bag=kg, sort_order=sort_order))
+            session.add(ProductOrm(code=code, name=name, kg_per_unit=kg, sort_order=sort_order,
+                                   unit_code="BAG", unit_label="Túi", scope="all", is_active=True))
 
 
 async def upsert_consent_v1(session: AsyncSession, now) -> None:

@@ -1,4 +1,5 @@
 import math
+import re
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -13,7 +14,8 @@ from source.database.models import (
     EmployeeLocationAssignmentOrm,
     AuditLogOrm, ConsentTextOrm, EmployeeOrm, InviteCodeOrm,
     LocationConsentOrm, NotificationOutboxOrm, OutputItemOrm, OutputLogOrm,
-    PayBatchOrm, ProductOrm, RateHistoryOrm, SyncOutboxOrm, WorkLocationOrm, WorkSessionOrm,
+    PayBatchOrm, ProductEmployeeScopeOrm, ProductLocationScopeOrm,
+    ProductOrm, RateHistoryOrm, SyncOutboxOrm, WorkLocationOrm, WorkSessionOrm,
 )
 from source.domain.workforce_errors import fail
 from source.enums import EmployeeRole, SessionStatus
@@ -47,9 +49,9 @@ def _flags(distance: float, accuracy: float | None, radius_m: int | Decimal | No
     return result
 
 
-def _event(event_type: str, payload: dict) -> SyncOutboxOrm:
+def _event(event_type: str, payload: dict, schema_version: int = 2) -> SyncOutboxOrm:
     return SyncOutboxOrm(event_type=event_type, payload={
-        "schema_version": 2,
+        "schema_version": schema_version,
         "event_id": str(uuid.uuid4()),
         "event_type": event_type,
         "occurred_at": iso_vn(Clock().now()),
@@ -134,6 +136,87 @@ def _recalculate_session(row: WorkSessionOrm) -> None:
         return
     row.minutes = max(0, int((_vn(row.check_out_at) - _vn(row.check_in_at)).total_seconds() // 60))
     row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
+
+
+def _effective_output_status(output: OutputLogOrm, now: datetime) -> str:
+    if output.status == "pending" and _vn(output.locked_at) <= _vn(now):
+        return "locked_unsubmitted"
+    return output.status
+
+
+async def _product_scope_ids(session: AsyncSession, product_ids: list[int]) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+    if not product_ids:
+        return {}, {}
+    location_rows = (await session.execute(select(
+        ProductLocationScopeOrm.product_id, ProductLocationScopeOrm.location_id,
+    ).where(ProductLocationScopeOrm.product_id.in_(product_ids)))).all()
+    employee_rows = (await session.execute(select(
+        ProductEmployeeScopeOrm.product_id, ProductEmployeeScopeOrm.employee_id,
+    ).where(ProductEmployeeScopeOrm.product_id.in_(product_ids)))).all()
+    by_location: dict[int, set[int]] = {}
+    by_employee: dict[int, set[int]] = {}
+    for product_id, location_id in location_rows:
+        by_location.setdefault(product_id, set()).add(location_id)
+    for product_id, employee_id in employee_rows:
+        by_employee.setdefault(product_id, set()).add(employee_id)
+    return by_location, by_employee
+
+
+async def _applicable_products_for_session(
+    session: AsyncSession,
+    row: WorkSessionOrm,
+    lock: bool = False,
+) -> list[ProductOrm]:
+    query = select(ProductOrm).where(
+        ProductOrm.deleted_at.is_(None),
+        ProductOrm.is_active.is_(True),
+    ).order_by(ProductOrm.id)
+    if lock:
+        query = query.with_for_update(read=True)
+    products = list((await session.scalars(query)).all())
+    location_scopes, employee_scopes = await _product_scope_ids(session, [p.id for p in products])
+    result: list[ProductOrm] = []
+    for product in products:
+        if product.scope == "all":
+            result.append(product)
+            continue
+        applies_location = row.work_location_id is not None and row.work_location_id in location_scopes.get(product.id, set())
+        applies_employee = row.employee_id in employee_scopes.get(product.id, set())
+        if applies_location or applies_employee:
+            result.append(product)
+    return sorted(result, key=lambda p: (p.sort_order, p.code))
+
+
+async def create_output_window_for_session(
+    session: AsyncSession,
+    row: WorkSessionOrm,
+    now: datetime,
+) -> OutputLogOrm:
+    existing = await session.scalar(select(OutputLogOrm).where(OutputLogOrm.work_session_id == row.id).with_for_update())
+    if existing:
+        return existing
+    products = await _applicable_products_for_session(session, row, lock=True)
+    output = OutputLogOrm(
+        work_session_id=row.id,
+        status="pending",
+        opened_at=now,
+        locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes),
+    )
+    session.add(output)
+    await session.flush()
+    for product in products:
+        session.add(OutputItemOrm(
+            output_log_id=output.id,
+            product_id=product.id,
+            product_code_snapshot=product.code,
+            product_name_snapshot=product.name,
+            unit_code_snapshot=product.unit_code,
+            unit_label_snapshot=product.unit_label,
+            kg_per_unit_snapshot=product.kg_per_unit,
+            sort_order_snapshot=product.sort_order,
+            quantity=0,
+        ))
+    return output
 
 
 async def current_consent(session: AsyncSession, employee_id: int, now: datetime) -> tuple[ConsentTextOrm | None, bool]:
@@ -494,7 +577,7 @@ class AttendanceService:
         row.minutes = max(0, int((now - _vn(row.check_in_at)).total_seconds() // 60))
         row.amount_raw = Decimal(row.minutes) * Decimal(row.rate_snapshot) / Decimal(60)
         row.status, row.closed_by = SessionStatus.closed, employee.id
-        self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
+        await create_output_window_for_session(self.session, row, now)
         self.session.add(_event("session_closed", {
             "employee": await employee_ref(self.session, employee.id),
             "location": session_location_ref(row),
@@ -582,16 +665,33 @@ class OutputService:
         output = await self.session.scalar(select(OutputLogOrm).where(OutputLogOrm.work_session_id == session_id))
         if not output:
             raise fail("SESSION_NOT_CLOSED")
-        products = list((await self.session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
-        items = {x.product_id: x for x in (await self.session.scalars(select(OutputItemOrm).where(OutputItemOrm.output_log_id == output.id))).all()}
+        items = list((await self.session.scalars(select(OutputItemOrm).where(
+            OutputItemOrm.output_log_id == output.id,
+        ).order_by(OutputItemOrm.sort_order_snapshot, OutputItemOrm.product_code_snapshot))).all())
         now = _vn(self.clock.now())
         locked_at = _vn(output.locked_at)
-        return {"session_id": session_id, "locked": now >= locked_at,
+        status = _effective_output_status(output, now)
+        return {"session_id": session_id, "locked": status == "locked_unsubmitted",
+                "status": status,
                 "seconds_remaining": max(0, int((locked_at - now).total_seconds())),
                 "locked_at": iso_vn(output.locked_at),
+                "opened_at": iso_vn(output.opened_at),
+                "submitted_at": iso_vn(output.submitted_at) if output.submitted_at else None,
                 "server_now": iso_vn(now),
-                "items": [{"code": p.code, "name": p.name, "kg_per_bag": float(p.kg_per_bag),
-                           "bags": items[p.id].bags if p.id in items else 0} for p in products]}
+                "items": [{
+                    "product_id": item.product_id,
+                    "code": item.product_code_snapshot,
+                    "name": item.product_name_snapshot,
+                    "unit_code": item.unit_code_snapshot,
+                    "unit_label": item.unit_label_snapshot,
+                    "kg_per_unit": float(item.kg_per_unit_snapshot),
+                    "kg_per_bag": float(item.kg_per_unit_snapshot),
+                    "sort_order": item.sort_order_snapshot,
+                    "quantity": item.quantity,
+                    "bags": item.quantity,
+                    "total_kg": float(item.total_kg),
+                    "kg": float(item.total_kg),
+                } for item in items]}
 
     async def submit(self, employee: EmployeeOrm, session_id: int, values: dict[str, int]) -> dict:
         work = await self.session.get(WorkSessionOrm, session_id)
@@ -603,26 +703,43 @@ class OutputService:
             raise fail("SESSION_NOT_CLOSED")
         if now >= _vn(output.locked_at):
             raise fail("OUTPUT_LOCKED")
-        products = list((await self.session.scalars(select(ProductOrm))).all())
-        known = {p.code for p in products}
-        if set(values) - known or any(not isinstance(v, int) or v < 0 or v > 9999 for v in values.values()):
+        items = list((await self.session.scalars(select(OutputItemOrm).where(
+            OutputItemOrm.output_log_id == output.id,
+        ).with_for_update())).all())
+        item_by_code = {item.product_code_snapshot: item for item in items}
+        if set(values) - set(item_by_code):
+            raise fail("PRODUCT_NOT_IN_SESSION", 422)
+        if any(not isinstance(v, int) or v < 0 or v > 9999 for v in values.values()):
             raise fail("OUTPUT_INVALID", 422)
-        await self.session.execute(delete(OutputItemOrm).where(OutputItemOrm.output_log_id == output.id))
         total = Decimal(0)
-        for product in products:
-            bags = values.get(product.code, 0)
-            kg = Decimal(bags) * product.kg_per_bag
-            total += kg
-            self.session.add(OutputItemOrm(output_log_id=output.id, product_id=product.id, bags=bags, kg=kg))
+        event_items = []
+        for item in sorted(items, key=lambda x: (x.sort_order_snapshot, x.product_code_snapshot)):
+            quantity = values.get(item.product_code_snapshot, item.quantity)
+            item.quantity = quantity
+            total_kg = Decimal(quantity) * Decimal(item.kg_per_unit_snapshot)
+            total += total_kg
+            event_items.append({
+                "product_id": item.product_id,
+                "product_code": item.product_code_snapshot,
+                "product_name": item.product_name_snapshot,
+                "unit": item.unit_label_snapshot,
+                "unit_code": item.unit_code_snapshot,
+                "quantity": quantity,
+                "kg_per_unit": float(item.kg_per_unit_snapshot),
+                "total_kg": float(total_kg),
+                "sort_order": item.sort_order_snapshot,
+            })
+        output.status = "submitted"
         output.submitted_at = now
         self.session.add(_event("output_submitted", {
             "employee": await employee_ref(self.session, work.employee_id),
             "location": session_location_ref(work),
             "session": {"id": session_id},
-            "items": values,
-        }))
+            "items": event_items,
+        }, schema_version=3))
         await self.session.flush()
-        return {"session_id": session_id, "total_kg": float(total), "locked_at": iso_vn(output.locked_at)}
+        return {"session_id": session_id, "total_kg": float(total), "locked_at": iso_vn(output.locked_at),
+                "status": output.status}
 
 
 class ReviewService:
@@ -775,7 +892,7 @@ class ReviewService:
         row.check_out_at = check_out_vn
         _recalculate_session(row)
         row.status, row.closed_by = SessionStatus.closed, actor.id
-        self.session.add(OutputLogOrm(work_session_id=row.id, locked_at=now + timedelta(minutes=settings.rules.output_edit_minutes)))
+        await create_output_window_for_session(self.session, row, now)
         self.session.add(AuditLogOrm(actor_id=actor.id, action="session_close_by_manager", entity_type="work_session", entity_id=row.id, reason=reason))
         self.session.add(_event("session_closed", {
             "employee": await employee_ref(self.session, row.employee_id),
@@ -1090,20 +1207,39 @@ class HistoryService:
 
     async def _output_items(self, session_id: int) -> list[dict]:
         rows = (await self.session.execute(select(
-            ProductOrm.code, ProductOrm.name,
-            func.coalesce(OutputItemOrm.bags, 0), func.coalesce(OutputItemOrm.kg, 0),
-        ).join(OutputItemOrm, OutputItemOrm.product_id == ProductOrm.id)
+            OutputItemOrm.product_code_snapshot,
+            OutputItemOrm.product_name_snapshot,
+            OutputItemOrm.unit_code_snapshot,
+            OutputItemOrm.unit_label_snapshot,
+            OutputItemOrm.kg_per_unit_snapshot,
+            OutputItemOrm.quantity,
+            OutputItemOrm.total_kg,
+            OutputLogOrm.status,
+        ).select_from(OutputItemOrm)
          .join(OutputLogOrm, OutputLogOrm.id == OutputItemOrm.output_log_id)
          .where(OutputLogOrm.work_session_id == session_id)
-         .order_by(ProductOrm.sort_order))).all()
-        return [{"code": x[0], "name": x[1], "bags": int(x[2]), "kg": float(x[3])} for x in rows]
+         .order_by(OutputItemOrm.sort_order_snapshot, OutputItemOrm.product_code_snapshot))).all()
+        return [{
+            "code": x[0],
+            "name": x[1],
+            "unit_code": x[2],
+            "unit_label": x[3],
+            "kg_per_unit": float(x[4]),
+            "quantity": int(x[5]),
+            "bags": int(x[5]),
+            "total_kg": float(x[6]),
+            "kg": float(x[6]),
+            "status": x[7],
+        } for x in rows]
 
     async def _output_state(self, session_id: int) -> dict:
         output = await self.session.scalar(select(OutputLogOrm).where(OutputLogOrm.work_session_id == session_id))
         if not output:
             return {"output_locked": True, "output_locked_at": None}
         locked_at = _vn(output.locked_at)
-        return {"output_locked": _vn(self.clock.now()) >= locked_at, "output_locked_at": iso_vn(output.locked_at)}
+        status = _effective_output_status(output, self.clock.now())
+        return {"output_locked": status == "locked_unsubmitted", "output_locked_at": iso_vn(output.locked_at),
+                "output_status": status, "output_submitted_at": iso_vn(output.submitted_at) if output.submitted_at else None}
 
     async def history(self, employee: EmployeeOrm, start: date | None, end: date | None) -> dict:
         today = _vn(self.clock.now()).date()
@@ -1249,9 +1385,17 @@ class ReportService:
         if location_id:
             filters.append(WorkSessionOrm.work_location_id == location_id)
         minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
-        production = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
-            func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
-            .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
+        production = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.quantity), 0),
+            func.coalesce(func.sum(OutputItemOrm.total_kg), 0)).select_from(OutputItemOrm)
+            .join(OutputLogOrm).join(WorkSessionOrm).where(*filters, OutputLogOrm.status == "submitted"))).one()
+        now = _vn(Clock().now())
+        unsubmitted_count = int(await self.session.scalar(select(func.count(func.distinct(OutputLogOrm.id))).select_from(OutputLogOrm)
+            .join(OutputItemOrm, OutputItemOrm.output_log_id == OutputLogOrm.id)
+            .join(WorkSessionOrm, WorkSessionOrm.id == OutputLogOrm.work_session_id)
+            .where(*filters, or_(
+                OutputLogOrm.status == "locked_unsubmitted",
+                and_(OutputLogOrm.status == "pending", OutputLogOrm.locked_at <= now),
+            ))) or 0)
         if location_id:
             raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(*filters)) or 0)
             paid = pending = pending_eligible = pending_blocked = needs_review_count = 0
@@ -1271,23 +1415,63 @@ class ReportService:
                 "paid": paid, "pending": pending, "pending_eligible": pending_eligible,
                 "pending_blocked": pending_blocked, "needs_review_count": needs_review_count,
                 "total": total,
-                "bags": int(production[0]), "kg": float(production[1])}
+                "bags": int(production[0]), "kg": float(production[1]),
+                "unsubmitted_output_count": unsubmitted_count}
 
     async def products(self, period: str, day: date, employee_id: int | None = None, location_id: int | None = None) -> list[dict]:
         start, end = self.bounds(period, day)
-        products = list((await self.session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
+        filters = [WorkSessionOrm.work_date.between(start, end), OutputLogOrm.status == "submitted"]
+        if employee_id:
+            filters.append(WorkSessionOrm.employee_id == employee_id)
+        if location_id:
+            filters.append(WorkSessionOrm.work_location_id == location_id)
+        rows = (await self.session.execute(select(
+            OutputItemOrm.product_code_snapshot,
+            func.min(OutputItemOrm.product_name_snapshot),
+            func.min(OutputItemOrm.unit_code_snapshot),
+            func.min(OutputItemOrm.unit_label_snapshot),
+            func.coalesce(func.sum(OutputItemOrm.quantity), 0),
+            func.coalesce(func.sum(OutputItemOrm.total_kg), 0),
+            func.count(func.distinct(OutputItemOrm.kg_per_unit_snapshot)),
+            func.min(OutputItemOrm.kg_per_unit_snapshot),
+            func.min(OutputItemOrm.sort_order_snapshot),
+        ).select_from(OutputItemOrm)
+         .join(OutputLogOrm, OutputLogOrm.id == OutputItemOrm.output_log_id)
+         .join(WorkSessionOrm, WorkSessionOrm.id == OutputLogOrm.work_session_id)
+         .where(*filters)
+         .group_by(OutputItemOrm.product_code_snapshot)
+         .order_by(func.min(OutputItemOrm.sort_order_snapshot), OutputItemOrm.product_code_snapshot))).all()
         result = []
-        for product in products:
-            filters = [WorkSessionOrm.work_date.between(start, end), OutputItemOrm.product_id == product.id]
-            if employee_id:
-                filters.append(WorkSessionOrm.employee_id == employee_id)
-            if location_id:
-                filters.append(WorkSessionOrm.work_location_id == location_id)
-            bags, kg = (await self.session.execute(select(
-                func.coalesce(func.sum(OutputItemOrm.bags), 0),
-                func.coalesce(func.sum(OutputItemOrm.kg), 0),
-            ).select_from(OutputItemOrm).join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
-            result.append({"code": product.code, "name": product.name, "bags": int(bags), "kg": float(kg)})
+        seen_codes = set()
+        for code, name, unit_code, unit_label, quantity, total_kg, spec_count, kg_per_unit, _sort in rows:
+            seen_codes.add(code)
+            result.append({
+                "code": code,
+                "name": name,
+                "unit_code": unit_code,
+                "unit_label": unit_label,
+                "quantity": int(quantity),
+                "bags": int(quantity),
+                "total_kg": float(total_kg),
+                "kg": float(total_kg),
+                "kg_per_unit": float(kg_per_unit),
+                "spec_count": int(spec_count),
+                "spec_warning": f"{int(spec_count)} quy cách trong kỳ" if int(spec_count) > 1 else None,
+            })
+        if not employee_id and not location_id:
+            active_products = list((await self.session.scalars(select(ProductOrm).where(
+                ProductOrm.deleted_at.is_(None), ProductOrm.is_active.is_(True),
+            ).order_by(ProductOrm.sort_order, ProductOrm.code))).all())
+            for product in active_products:
+                if product.code in seen_codes:
+                    continue
+                result.append({
+                    "code": product.code, "name": product.name,
+                    "unit_code": product.unit_code, "unit_label": product.unit_label,
+                    "quantity": 0, "bags": 0, "total_kg": 0.0, "kg": 0.0,
+                    "kg_per_unit": float(product.kg_per_unit), "is_active": product.is_active,
+                    "spec_count": 1, "spec_warning": None,
+                })
         return result
 
     async def timeseries(self, period: str, day: date, employee_id: int | None = None, location_id: int | None = None) -> list[dict]:
@@ -1302,9 +1486,9 @@ class ReportService:
             if location_id:
                 filters.append(WorkSessionOrm.work_location_id == location_id)
             minutes = int(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.minutes), 0)).where(*filters)) or 0)
-            bags, kg = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.bags), 0),
-                func.coalesce(func.sum(OutputItemOrm.kg), 0)).select_from(OutputItemOrm)
-                .join(OutputLogOrm).join(WorkSessionOrm).where(*filters))).one()
+            bags, kg = (await self.session.execute(select(func.coalesce(func.sum(OutputItemOrm.quantity), 0),
+                func.coalesce(func.sum(OutputItemOrm.total_kg), 0)).select_from(OutputItemOrm)
+                .join(OutputLogOrm).join(WorkSessionOrm).where(*filters, OutputLogOrm.status == "submitted"))).one()
             if location_id:
                 raw = Decimal(await self.session.scalar(select(func.coalesce(func.sum(WorkSessionOrm.amount_raw), 0)).where(*filters)) or 0)
                 salary = {"total": int(raw), "paid": 0, "pending": 0, "pending_eligible": 0, "pending_blocked": 0, "needs_review_count": 0}
@@ -1318,6 +1502,230 @@ class ReportService:
                          "bags": int(bags), "kg": float(kg)})
             current += timedelta(days=1)
         return rows
+
+
+class ProductCatalogService:
+    def __init__(self, session: AsyncSession, clock: Clock | None = None):
+        self.session, self.clock = session, clock or Clock()
+
+    def _validate_product(self, code: str | None, name: str | None, kg_per_unit: Decimal | float | str | None,
+                          unit_label: str | None) -> tuple[str, str, Decimal, str]:
+        code_value = (code or "").strip().upper()
+        name_value = (name or "").strip()
+        unit_label_value = (unit_label or "Túi").strip() or "Túi"
+        if not re.fullmatch(r"[A-Z0-9_]{1,32}", code_value):
+            raise fail("PRODUCT_INVALID", 422, {"fields": {"code": "Mã chỉ gồm chữ HOA, số và dấu gạch dưới"}})
+        if not name_value:
+            raise fail("PRODUCT_INVALID", 422, {"fields": {"name": "Tên sản phẩm bắt buộc"}})
+        value = Decimal(str(kg_per_unit))
+        if value < Decimal("0.001") or value > Decimal("1000"):
+            raise fail("PRODUCT_INVALID", 422, {"fields": {"kg_per_unit": "Quy cách phải từ 0,001 đến 1.000"}})
+        return code_value, name_value, value, unit_label_value
+
+    async def _scope_summary(self, product: ProductOrm) -> dict:
+        location_ids = list((await self.session.scalars(select(ProductLocationScopeOrm.location_id).where(
+            ProductLocationScopeOrm.product_id == product.id,
+        ))).all())
+        employee_ids = list((await self.session.scalars(select(ProductEmployeeScopeOrm.employee_id).where(
+            ProductEmployeeScopeOrm.product_id == product.id,
+        ))).all())
+        applied = await self._applied_employee_count(product.scope, set(location_ids), set(employee_ids))
+        return {
+            "scope": product.scope,
+            "location_ids": location_ids,
+            "employee_ids": employee_ids,
+            "location_count": len(location_ids),
+            "employee_count": len(employee_ids),
+            "applied_employee_count": applied,
+        }
+
+    async def _applied_employee_count(self, scope: str, location_ids: set[int], employee_ids: set[int]) -> int:
+        employees = list((await self.session.scalars(select(EmployeeOrm).where(
+            EmployeeOrm.role == EmployeeRole.employee,
+            EmployeeOrm.is_active.is_(True),
+        ))).all())
+        if scope == "all":
+            return len(employees)
+        count = 0
+        for employee in employees:
+            assignment = await current_location_assignment(self.session, employee.id)
+            if employee.id in employee_ids or (assignment and assignment.location_id in location_ids):
+                count += 1
+        return count
+
+    async def _product_payload(self, product: ProductOrm) -> dict:
+        used = bool(await self.session.scalar(select(OutputItemOrm.id).where(
+            OutputItemOrm.product_id == product.id,
+        ).limit(1)))
+        return {
+            "id": product.id,
+            "code": product.code,
+            "name": product.name,
+            "unit_code": product.unit_code,
+            "unit_label": product.unit_label,
+            "kg_per_unit": float(product.kg_per_unit),
+            "sort_order": product.sort_order,
+            "is_active": product.is_active,
+            "scope": product.scope,
+            "deleted_at": iso_vn(product.deleted_at) if product.deleted_at else None,
+            "created_at": iso_vn(product.created_at) if product.created_at else None,
+            "updated_at": iso_vn(product.updated_at) if product.updated_at else None,
+            "scope_summary": await self._scope_summary(product),
+            "used": used,
+        }
+
+    async def list_products(self, include_deleted: bool = False, q: str | None = None) -> list[dict]:
+        query = select(ProductOrm)
+        if not include_deleted:
+            query = query.where(ProductOrm.deleted_at.is_(None))
+        if q:
+            like = f"%{q.strip()}%"
+            query = query.where(or_(ProductOrm.code.ilike(like), ProductOrm.name.ilike(like)))
+        rows = list((await self.session.scalars(query.order_by(ProductOrm.sort_order, ProductOrm.code))).all())
+        return [await self._product_payload(row) for row in rows]
+
+    async def get_product(self, product_id: int) -> dict:
+        product = await self.session.get(ProductOrm, product_id)
+        if not product or product.deleted_at is not None:
+            raise fail("PRODUCT_NOT_FOUND", 404)
+        return await self._product_payload(product)
+
+    async def _ensure_unique_product(self, code: str | None, name: str | None, exclude_id: int | None = None) -> None:
+        if code:
+            query = select(ProductOrm.id).where(ProductOrm.code == code)
+            if exclude_id:
+                query = query.where(ProductOrm.id != exclude_id)
+            if await self.session.scalar(query):
+                raise fail("PRODUCT_CODE_EXISTS", 409)
+        if name:
+            query = select(ProductOrm.id).where(ProductOrm.name == name, ProductOrm.deleted_at.is_(None))
+            if exclude_id:
+                query = query.where(ProductOrm.id != exclude_id)
+            if await self.session.scalar(query):
+                raise fail("PRODUCT_NAME_EXISTS", 409)
+
+    async def create_product(self, actor: EmployeeOrm, code: str, name: str, kg_per_unit: Decimal | float | str,
+                             unit_code: str = "BAG", unit_label: str = "Túi", sort_order: int | None = None,
+                             scope: str = "all", location_ids: list[int] | None = None,
+                             employee_ids: list[int] | None = None) -> dict:
+        code_value, name_value, kg_value, unit_label_value = self._validate_product(code, name, kg_per_unit, unit_label)
+        await self._ensure_unique_product(code_value, name_value)
+        if scope not in {"all", "restricted"}:
+            raise fail("PRODUCT_INVALID", 422)
+        if sort_order is None:
+            sort_order = int(await self.session.scalar(select(func.coalesce(func.max(ProductOrm.sort_order), 0))) or 0) + 1
+        product = ProductOrm(code=code_value, name=name_value, kg_per_unit=kg_value,
+                             unit_code=(unit_code or "BAG").strip().upper() or "BAG",
+                             unit_label=unit_label_value, sort_order=sort_order,
+                             is_active=True, scope=scope, created_by=actor.id)
+        self.session.add(product)
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise fail("PRODUCT_CODE_EXISTS", 409) from exc
+        await self._replace_scope(product, scope, location_ids or [], employee_ids or [])
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_created", entity_type="product", entity_id=product.id))
+        await self.session.flush()
+        return await self._product_payload(product)
+
+    async def update_product(self, actor: EmployeeOrm, product_id: int, **changes) -> dict:
+        product = await self.session.scalar(select(ProductOrm).where(ProductOrm.id == product_id).with_for_update())
+        if not product or product.deleted_at is not None:
+            raise fail("PRODUCT_NOT_FOUND", 404)
+        if "code" in changes and changes["code"] is not None and changes["code"].strip().upper() != product.code:
+            raise fail("PRODUCT_INVALID", 422, {"fields": {"code": "Mã sản phẩm không được đổi"}})
+        new_name = changes.get("name", product.name)
+        new_kg = changes.get("kg_per_unit", product.kg_per_unit)
+        new_unit_label = changes.get("unit_label", product.unit_label)
+        _, name_value, kg_value, unit_label_value = self._validate_product(product.code, new_name, new_kg, new_unit_label)
+        await self._ensure_unique_product(None, name_value, exclude_id=product.id)
+        old = {"name": product.name, "kg_per_unit": str(product.kg_per_unit), "sort_order": product.sort_order}
+        product.name = name_value
+        product.kg_per_unit = kg_value
+        product.unit_code = (changes.get("unit_code") or product.unit_code or "BAG").strip().upper()
+        product.unit_label = unit_label_value
+        if "sort_order" in changes and changes["sort_order"] is not None:
+            product.sort_order = int(changes["sort_order"])
+        product.updated_at = self.clock.now()
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_updated", entity_type="product",
+                                     entity_id=product.id, old_value=old,
+                                     new_value={"name": product.name, "kg_per_unit": str(product.kg_per_unit), "sort_order": product.sort_order}))
+        await self.session.flush()
+        return await self._product_payload(product)
+
+    async def _replace_scope(self, product: ProductOrm, scope: str, location_ids: list[int], employee_ids: list[int]) -> None:
+        if scope not in {"all", "restricted"}:
+            raise fail("PRODUCT_INVALID", 422)
+        product.scope = scope
+        await self.session.execute(delete(ProductLocationScopeOrm).where(ProductLocationScopeOrm.product_id == product.id))
+        await self.session.execute(delete(ProductEmployeeScopeOrm).where(ProductEmployeeScopeOrm.product_id == product.id))
+        if scope == "restricted":
+            for location_id in sorted(set(location_ids)):
+                self.session.add(ProductLocationScopeOrm(product_id=product.id, location_id=location_id))
+            for employee_id in sorted(set(employee_ids)):
+                self.session.add(ProductEmployeeScopeOrm(product_id=product.id, employee_id=employee_id))
+
+    async def update_scope(self, actor: EmployeeOrm, product_id: int, scope: str,
+                           location_ids: list[int] | None = None, employee_ids: list[int] | None = None) -> dict:
+        product = await self.session.scalar(select(ProductOrm).where(ProductOrm.id == product_id).with_for_update())
+        if not product or product.deleted_at is not None:
+            raise fail("PRODUCT_NOT_FOUND", 404)
+        old = await self._scope_summary(product)
+        await self._replace_scope(product, scope, location_ids or [], employee_ids or [])
+        await self.session.flush()
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_scope_changed", entity_type="product",
+                                     entity_id=product.id, old_value=old, new_value=await self._scope_summary(product)))
+        return await self._product_payload(product)
+
+    async def set_active(self, actor: EmployeeOrm, product_id: int, active: bool) -> dict:
+        product = await self.session.scalar(select(ProductOrm).where(ProductOrm.id == product_id).with_for_update())
+        if not product or product.deleted_at is not None:
+            raise fail("PRODUCT_NOT_FOUND", 404)
+        product.is_active = active
+        product.updated_at = self.clock.now()
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_reactivated" if active else "product_deactivated",
+                                     entity_type="product", entity_id=product.id))
+        return await self._product_payload(product)
+
+    async def delete_product(self, actor: EmployeeOrm, product_id: int) -> dict:
+        product = await self.session.scalar(select(ProductOrm).where(ProductOrm.id == product_id).with_for_update())
+        if not product or product.deleted_at is not None:
+            raise fail("PRODUCT_NOT_FOUND", 404)
+        used = await self.session.scalar(select(OutputItemOrm.id).where(OutputItemOrm.product_id == product_id).limit(1))
+        if used:
+            raise fail("PRODUCT_IN_USE", 409)
+        product.deleted_at = self.clock.now()
+        product.deleted_by = actor.id
+        product.is_active = False
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_deleted", entity_type="product", entity_id=product.id))
+        return await self._product_payload(product)
+
+    async def reorder(self, actor: EmployeeOrm, items: list[dict]) -> list[dict]:
+        for item in items:
+            product = await self.session.scalar(select(ProductOrm).where(ProductOrm.id == int(item["id"])).with_for_update())
+            if product and product.deleted_at is None:
+                product.sort_order = int(item["sort_order"])
+                product.updated_at = self.clock.now()
+        self.session.add(AuditLogOrm(actor_id=actor.id, action="product_reordered", entity_type="product", entity_id=None))
+        await self.session.flush()
+        return await self.list_products()
+
+    async def employee_options(self) -> list[dict]:
+        rows = list((await self.session.scalars(select(EmployeeOrm).where(
+            EmployeeOrm.role == EmployeeRole.employee,
+        ).order_by(EmployeeOrm.code))).all())
+        result = []
+        for employee in rows:
+            location = await current_work_location(self.session, employee.id)
+            result.append({
+                "id": employee.id,
+                "code": employee.code,
+                "name": employee.full_name,
+                "location_id": location.id if location else None,
+                "location_name": location.name if location else None,
+                "is_active": employee.is_active,
+            })
+        return result
 
 
 class WorkLocationService:
