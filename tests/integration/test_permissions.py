@@ -115,7 +115,7 @@ async def permission_context(pg_factory, permission_client):
                 session.add(EmployeeLocationAssignmentOrm(employee_id=row_employee.id, location_id=location.id,
                                                          effective_from=NOW, reason="test"))
             session.add(RateHistoryOrm(employee_id=employee.id, hourly_rate=30_000, effective_from=NOW, reason="test rate"))
-            product = ProductOrm(code="BOT", name="Bột", kg_per_bag=Decimal("1.20"), sort_order=1)
+            product = ProductOrm(code="BOT", name="Bột", kg_per_unit=Decimal("1.20"), sort_order=1)
             session.add(product)
             row = WorkSessionOrm(
                 employee_id=employee.id,
@@ -191,6 +191,16 @@ def endpoint_cases(ids: dict) -> list[tuple[str, str, set[str], object]]:
         ("POST", f"/api/locations/{location_id}/deactivate", {"manager", "director"}, None),
         ("POST", f"/api/locations/{location_id}/activate", {"manager", "director"}, None),
         ("POST", f"/api/locations/employees/{managed_id}/assignment", {"manager"}, {"location_id": location_id, "reason": "doi kho"}),
+        ("GET", "/api/catalog/products", {"manager", "director"}, None),
+        ("POST", "/api/catalog/products", {"manager", "director"}, {"code": "SPX", "name": "San pham X", "kg_per_unit": "1.2", "unit_label": "Túi", "scope": "all"}),
+        ("GET", "/api/catalog/products/1", {"manager", "director"}, None),
+        ("PATCH", "/api/catalog/products/1", {"manager", "director"}, {"name": "Bột"}),
+        ("POST", "/api/catalog/products/1/deactivate", {"manager", "director"}, None),
+        ("POST", "/api/catalog/products/1/reactivate", {"manager", "director"}, None),
+        ("DELETE", "/api/catalog/products/1", {"manager", "director"}, None),
+        ("PATCH", "/api/catalog/products/1/scope", {"manager", "director"}, {"scope": "all"}),
+        ("POST", "/api/catalog/products/reorder", {"manager", "director"}, {"items": [{"id": 1, "sort_order": 1}]}),
+        ("GET", "/api/catalog/employee-options", {"manager", "director"}, None),
         ("GET", "/api/review/pending", {"manager", "director"}, None),
         ("GET", "/api/review/resolved", {"manager", "director"}, None),
         ("POST", f"/api/review/{session_id}/flags-reviewed", {"manager", "director"}, None),
@@ -260,5 +270,7 @@ async def test_permission_table_covers_all_api_routes(permission_context):
                                   .replace("/conversations/1/", "/conversations/{conversation_id}/")
                                   .replace("/announcements/1/ack", "/announcements/{announcement_id}/ack")
                                   .replace("333", "{location_id}")
+                                  .replace("/catalog/products/1/", "/catalog/products/{product_id}/")
+                                  .replace("/catalog/products/1", "/catalog/products/{product_id}")
                                   .replace("/rates/1/cancel", "/rates/{rate_id}/cancel")))
     assert actual == table_normalized

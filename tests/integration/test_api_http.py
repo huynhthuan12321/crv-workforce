@@ -204,7 +204,7 @@ async def test_http_write_endpoints_succeed_on_postgres(api_client, pg_factory):
         async with session.begin():
             session.add(ConsentTextOrm(version=1, content="consent", effective_at=NOW - timedelta(days=1)))
             for idx, code in enumerate(["BOT", "XUC_XICH", "PHO_MAI", "CHA_BONG", "SOT_CAM", "SOT_TRANG", "BO"], start=1):
-                session.add(ProductOrm(code=code, name=code, kg_per_bag=Decimal("1.00"), sort_order=idx))
+                session.add(ProductOrm(code=code, name=code, kg_per_unit=Decimal("1.00"), sort_order=idx))
             employee = await seed_actor(session, "NV001", EmployeeRole.employee, 1001)
             manager = await seed_actor(session, "QL001", EmployeeRole.manager, 2001)
             await seed_rate(session, employee.id)
@@ -425,17 +425,28 @@ async def test_history_grouped_by_day_shows_batch_money_and_output(api_client, p
     async with pg_factory() as session:
         async with session.begin():
             session.add(ConsentTextOrm(version=1, content="consent", effective_at=NOW - timedelta(days=1)))
-            product = ProductOrm(code="BOT", name="Bột", kg_per_bag=Decimal("1.20"), sort_order=1)
+            product = ProductOrm(code="BOT", name="Bột", kg_per_unit=Decimal("1.20"), sort_order=1)
             session.add(product)
             employee = await seed_actor(session, "NVHIS", EmployeeRole.employee, 6001)
             manager = await seed_actor(session, "QLHIS", EmployeeRole.manager, 6002)
             row = work_session(employee.id, check_in=NOW.replace(hour=7), check_out=NOW.replace(hour=8))
             session.add(row)
             await session.flush()
-            output = OutputLogOrm(work_session_id=row.id, submitted_at=NOW, locked_at=NOW + timedelta(minutes=10))
+            output = OutputLogOrm(work_session_id=row.id, status="submitted", opened_at=NOW,
+                                  submitted_at=NOW, locked_at=NOW + timedelta(minutes=10))
             session.add(output)
             await session.flush()
-            session.add(OutputItemOrm(output_log_id=output.id, product_id=product.id, bags=5, kg=Decimal("6.00")))
+            session.add(OutputItemOrm(
+                output_log_id=output.id,
+                product_id=product.id,
+                product_code_snapshot=product.code,
+                product_name_snapshot=product.name,
+                unit_code_snapshot=product.unit_code,
+                unit_label_snapshot=product.unit_label,
+                kg_per_unit_snapshot=product.kg_per_unit,
+                sort_order_snapshot=product.sort_order,
+                quantity=5,
+            ))
             employee_id, manager_id = employee.id, manager.id
 
     response = api_client.post("/api/payroll/approve", json={"date": str(NOW.date()), "employee_ids": [employee_id]},

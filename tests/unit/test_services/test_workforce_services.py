@@ -97,7 +97,7 @@ async def add_products(session) -> None:
         ("BO", "Bơ", Decimal("2"), 7),
     ]
     for code, name, kg, order in products:
-        session.add(ProductOrm(code=code, name=name, kg_per_bag=kg, sort_order=order))
+        session.add(ProductOrm(code=code, name=name, kg_per_unit=kg, sort_order=order))
     await session.flush()
 
 
@@ -275,7 +275,22 @@ async def test_output_total_lock_boundary_and_owner(session):
     other = await make_employee(session, "NV002", "Người khác")
     await add_products(session)
     work = await closed_session(session, owner, dt(6, 12), dt(11, 35))
-    session.add(OutputLogOrm(work_session_id=work.id, locked_at=dt(11, 45)))
+    output = OutputLogOrm(work_session_id=work.id, status="pending", opened_at=dt(11, 35), locked_at=dt(11, 45))
+    session.add(output)
+    await session.flush()
+    products = list((await session.scalars(select(ProductOrm).order_by(ProductOrm.sort_order))).all())
+    for product in products:
+        session.add(OutputItemOrm(
+            output_log_id=output.id,
+            product_id=product.id,
+            product_code_snapshot=product.code,
+            product_name_snapshot=product.name,
+            unit_code_snapshot=product.unit_code,
+            unit_label_snapshot=product.unit_label,
+            kg_per_unit_snapshot=product.kg_per_unit,
+            sort_order_snapshot=product.sort_order,
+            quantity=0,
+        ))
     await session.flush()
 
     values = {"BOT": 5, "XUC_XICH": 3, "PHO_MAI": 2, "CHA_BONG": 1, "SOT_CAM": 1}

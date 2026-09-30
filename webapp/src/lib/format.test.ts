@@ -10,13 +10,13 @@ describe("format", () => {
     expect(fmtKg(14)).toBe("14,0 kg");
   });
 
-  it("sums production by kg_per_bag", () => {
+  it("sums production by snapshot kg_per_unit", () => {
     expect(totalKg([
-      {bags: 5, kg_per_bag: 1.2},
-      {bags: 3, kg_per_bag: 1},
-      {bags: 2, kg_per_bag: 1},
-      {bags: 1, kg_per_bag: 1},
-      {bags: 1, kg_per_bag: 2},
+      {quantity: 5, kg_per_unit: 1.2},
+      {quantity: 3, kg_per_unit: 1},
+      {quantity: 2, kg_per_unit: 1},
+      {quantity: 1, kg_per_unit: 1},
+      {quantity: 1, kg_per_unit: 2},
     ])).toBe(14);
   });
 });
