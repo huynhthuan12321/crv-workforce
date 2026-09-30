@@ -8,7 +8,7 @@ import {hapticImpact} from "../../lib/haptic";
 import {todayVN} from "../../lib/date-vn";
 import type {ProductTotal, ReportEmployee, ReportSummary, ReportTimeseries, WorkLocation} from "../../types/api";
 import {useBackButton} from "../manager/shared";
-import {LocationsScreen} from "../manager/employees/EmployeesScreen";
+import {LocationsScreen, ProductCatalogScreen} from "../manager/employees/EmployeesScreen";
 import {LocationFilterChips} from "../locations/LocationFilterChips";
 
 function reportMockScenario() {
@@ -73,7 +73,7 @@ export function ReportsScreen() {
   const [employee, setEmployee] = useState<ReportEmployee | null>(null);
   const [location, setLocation] = useState<WorkLocation | null>(null);
   const [picker, setPicker] = useState(scenario === mockKey("director", "report", "employees"));
-  const [catalog, setCatalog] = useState(false);
+  const [catalog, setCatalog] = useState<"none" | "locations" | "products">("none");
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [series, setSeries] = useState<ReportTimeseries[]>([]);
   const [products, setProducts] = useState<ProductTotal[]>([]);
@@ -97,17 +97,18 @@ export function ReportsScreen() {
     if (scenario !== mockKey("director", "report", "filtered")) return;
     void api.get<ReportEmployee[]>("/reports/employees").then((rows) => setEmployee(rows[0] ?? null));
   }, [scenario]);
-  useBackButton(picker || catalog, () => { setPicker(false); setCatalog(false); });
-  if (catalog) return <LocationsScreen onBack={() => setCatalog(false)} canAssignEmployees={false} />;
+  useBackButton(picker || catalog !== "none", () => { setPicker(false); setCatalog("none"); });
+  if (catalog === "locations") return <LocationsScreen onBack={() => setCatalog("none")} canAssignEmployees={false} />;
+  if (catalog === "products") return <ProductCatalogScreen onBack={() => setCatalog("none")} />;
   if (picker) return <EmployeePicker selected={employee} onSelect={setEmployee} onClose={() => setPicker(false)} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải báo cáo" />;
   if (error) return <ScreenState kind="error" title="Không tải được báo cáo" message={error} onRetry={load} />;
   if (!summary) return <ScreenState kind="empty" title="Không có dữ liệu" />;
-  const total = products.reduce((acc, row) => ({bags: acc.bags + row.bags, kg: acc.kg + row.kg}), {bags: 0, kg: 0});
+  const total = products.reduce((acc, row) => ({bags: acc.bags + (row.quantity ?? row.bags ?? 0), kg: acc.kg + (row.total_kg ?? row.kg ?? 0)}), {bags: 0, kg: 0});
   const bounds = periodBounds(period, date);
   const canNext = bounds.to < today;
   return <div className="screen-stack reports-screen">
-    <SectionTitle eyebrow="Báo cáo" title="Tổng quan" action={<Button tone="secondary" className="small-button" onClick={() => setCatalog(true)}>Danh mục → Kho</Button>} />
+    <SectionTitle eyebrow="Báo cáo" title="Tổng quan" action={<div className="action-row"><Button tone="secondary" className="small-button" onClick={() => setCatalog("locations")}>Danh mục → Kho</Button><Button tone="secondary" className="small-button" onClick={() => setCatalog("products")}>Danh mục → Sản phẩm</Button></div>} />
     <div className="segmented">{(["day", "week", "month"] as const).map((key) => <button key={key} className={period === key ? "active" : ""} onClick={() => { hapticImpact(); setPeriod(key); }}>{key === "day" ? "Ngày" : key === "week" ? "Tuần" : "Tháng"}</button>)}</div>
     <div className="report-period-nav"><button onClick={() => setDate(shiftPeriod(period, date, -1))}>‹</button><b>{periodLabel(period, date)}</b><button disabled={!canNext} onClick={() => setDate(shiftPeriod(period, date, 1))}>›</button></div>
     <button className="filter-chip" onClick={() => setPicker(true)}>{employee ? `${employee.code} · ${employee.full_name} ✕` : "Tất cả nhân viên"}</button>
@@ -125,6 +126,6 @@ export function ReportsScreen() {
       {summary.needs_review_count > 0 && <p className="muted">{summary.needs_review_count} phiên quên ra ca chưa có giờ ra.</p>}
     </Card>
     <Card><SectionTitle title="Biểu đồ theo ngày" /><ReportChart rows={series} /></Card>
-    <Card><SectionTitle title="Sản lượng theo mặt hàng" /><div className="product-table"><div className="product-table__head"><span>Mặt hàng</span><span>Túi</span><span>Kg</span></div>{products.map((row) => <div className="product-table__row" key={row.code}><span>{row.name}</span><span>{row.bags}</span><span>{row.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</span></div>)}<div className="product-table__row product-table__total"><b>Tổng</b><b>{total.bags}</b><b>{total.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</b></div></div></Card>
+    <Card><SectionTitle title="Sản lượng theo mặt hàng" /><div className="product-table"><div className="product-table__head"><span>Mặt hàng</span><span>Số lượng</span><span>Kg</span></div>{products.map((row) => <div className="product-table__row" key={row.code}><span>{row.name}{row.spec_warning ? ` · ⚠ ${row.spec_warning}` : ""}</span><span>{row.quantity ?? row.bags ?? 0} {row.unit_label ?? "Túi"}</span><span>{(row.total_kg ?? row.kg ?? 0).toLocaleString("vi-VN", {minimumFractionDigits: 1})}</span></div>)}<div className="product-table__row product-table__total"><b>Tổng</b><b>{total.bags}</b><b>{total.kg.toLocaleString("vi-VN", {minimumFractionDigits: 1})}</b></div></div></Card>
   </div>;
 }

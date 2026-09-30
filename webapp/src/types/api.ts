@@ -92,22 +92,41 @@ export type Consent = {
 export type ProductTotal = {
   code: string;
   name: string;
-  bags: number;
-  kg: number;
+  bags?: number;
+  kg?: number;
+  quantity?: number;
+  total_kg?: number;
+  unit_code?: string | null;
+  unit_label?: string | null;
+  kg_per_unit?: number | null;
+  is_active?: boolean | null;
+  spec_count?: number | null;
+  spec_warning?: string | null;
 };
 
 export type OutputItem = {
+  product_id?: number;
   code: string;
   name: string;
-  kg_per_bag: number;
-  bags: number;
+  unit_code?: string;
+  unit_label?: string;
+  kg_per_unit?: number;
+  kg_per_bag?: number;
+  sort_order?: number;
+  quantity?: number;
+  bags?: number;
+  total_kg?: number;
+  kg?: number;
 };
 
 export type OutputForm = {
   session_id: number;
   locked: boolean;
+  status?: "pending" | "submitted" | "locked_unsubmitted" | string;
   seconds_remaining: number;
   locked_at: string;
+  opened_at?: string;
+  submitted_at?: string | null;
   server_now: string;
   items: OutputItem[];
 };
@@ -116,6 +135,7 @@ export type OutputSubmit = {
   session_id: number;
   total_kg: number;
   locked_at: string | null;
+  status?: string | null;
 };
 
 export type HistorySession = WorkSession & {
@@ -316,6 +336,7 @@ export type ReportSummary = {
   total: number;
   bags: number;
   kg: number;
+  unsubmitted_output_count?: number;
 };
 
 export type ReportTimeseries = {
@@ -329,4 +350,37 @@ export type ReportTimeseries = {
   needs_review_count: number;
   bags: number;
   kg: number;
+};
+
+export type CatalogProduct = {
+  id: number;
+  code: string;
+  name: string;
+  unit_code: string;
+  unit_label: string;
+  kg_per_unit: number;
+  sort_order: number;
+  is_active: boolean;
+  scope: "all" | "restricted" | string;
+  deleted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  used: boolean;
+  scope_summary: {
+    scope: string;
+    location_ids: number[];
+    employee_ids: number[];
+    location_count: number;
+    employee_count: number;
+    applied_employee_count: number;
+  };
+};
+
+export type CatalogEmployeeOption = {
+  id: number;
+  code: string;
+  name: string;
+  location_id: number | null;
+  location_name: string | null;
+  is_active: boolean;
 };

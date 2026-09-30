@@ -5,7 +5,7 @@ import {fmtCountdown, fmtDate, fmtTime, todayVN} from "../../lib/date-vn";
 import {fmtKg, totalKg} from "../../lib/format";
 import {hapticImpact, hapticNotify} from "../../lib/haptic";
 import {serverNow, syncServerClock} from "../../lib/server-clock";
-import type {History, HistorySession, OutputForm, OutputSubmit} from "../../types/api";
+import type {History, HistorySession, OutputForm, OutputItem, OutputSubmit} from "../../types/api";
 
 export function eligibleSessions(history: History): HistorySession[] {
   const closed = history.days.flatMap((day) => [
@@ -20,6 +20,14 @@ export function eligibleSessions(history: History): HistorySession[] {
 export function sessionLabel(session: HistorySession, today: string): string {
   const day = todayVN(new Date(session.check_in_at)) === today ? "Hôm nay" : fmtDate(session.check_in_at);
   return `${day} · ${fmtTime(session.check_in_at)}–${fmtTime(session.check_out_at)}`;
+}
+
+function itemQuantity(item: OutputItem): number {
+  return item.quantity ?? item.bags ?? 0;
+}
+
+function itemKgPerUnit(item: OutputItem): number {
+  return item.kg_per_unit ?? item.kg_per_bag ?? 0;
 }
 
 export function OutputsScreen({recentSessionId}: {recentSessionId: number | null}) {
@@ -71,10 +79,10 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
     }
   }, [form, loadForm, secondsRemaining]);
 
-  const updateBag = (code: string, bags: number) => {
+  const updateQuantity = (code: string, quantity: number) => {
     setForm((current) => current ? {
       ...current,
-      items: current.items.map((item) => item.code === code ? {...item, bags: Math.max(0, Math.min(9999, Math.floor(bags || 0)))} : item),
+      items: current.items.map((item) => item.code === code ? {...item, quantity: Math.max(0, Math.min(9999, Math.floor(quantity || 0)))} : item),
     } : current);
   };
 
@@ -84,7 +92,7 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
     setError("");
     hapticImpact("medium");
     try {
-      const payload = Object.fromEntries(form.items.map((item) => [item.code, item.bags]));
+      const payload = Object.fromEntries(form.items.map((item) => [item.code, itemQuantity(item)]));
       await api.put<OutputSubmit>(`/outputs/${form.session_id}`, {items: payload});
       hapticNotify("success");
       await loadForm(form.session_id);
@@ -123,33 +131,45 @@ export function OutputsScreen({recentSessionId}: {recentSessionId: number | null
               title={sessions.find((session) => session.id === form.session_id) ? sessionLabel(sessions.find((session) => session.id === form.session_id)!, history.to) : "Phiên vừa ra ca"}
               eyebrow={locked ? "Đã khóa chỉnh sửa" : `Còn ${fmtCountdown(secondsRemaining)} để chỉnh sửa`}
             />
-            <Chip tone={locked ? "danger" : "success"}>{locked ? "Đã khóa" : "Đang mở"}</Chip>
+            <Chip tone={form.status === "submitted" ? "success" : locked ? "danger" : "success"}>
+              {form.status === "submitted" ? "Đã xác nhận" : locked ? "Đã khóa" : "Đang mở"}
+            </Chip>
           </div>
-          {locked && <div className="gps-banner gps-banner--warning">Đã khóa chỉnh sửa</div>}
-          <div className="product-list">
-            {form.items.map((item) => (
-              <div key={item.code} className="product-row">
-                <span><b>{item.name}</b><small>{item.code} · {fmtKg(item.kg_per_bag)}/túi</small></span>
-                <div className="stepper">
-                  <button type="button" disabled={locked} onClick={() => updateBag(item.code, item.bags - 1)}>−</button>
-                  <input
-                    type="number"
-                    min="0"
-                    max="9999"
-                    aria-label={`Số túi ${item.name}`}
-                    disabled={locked}
-                    value={item.bags}
-                    onChange={(event) => updateBag(item.code, Number(event.target.value || 0))}
-                  />
-                  <button type="button" disabled={locked} onClick={() => updateBag(item.code, item.bags + 1)}>+</button>
-                </div>
-                <em>{fmtKg(item.bags * item.kg_per_bag)}</em>
-              </div>
-            ))}
-          </div>
+          {form.status === "submitted" && form.submitted_at && <div className="gps-banner gps-banner--success">Đã xác nhận lúc {fmtTime(form.submitted_at)}</div>}
+          {locked && form.status !== "submitted" && <div className="gps-banner gps-banner--warning">Đã khóa – chưa khai</div>}
+          {form.items.length === 0 ? (
+            <div className="state state--empty"><p>Không có sản phẩm cần khai cho ca này.</p></div>
+          ) : (
+            <div className="product-list">
+              {form.items.map((item) => {
+                const quantity = itemQuantity(item);
+                const kgPerUnit = itemKgPerUnit(item);
+                const unitLabel = item.unit_label || "Túi";
+                return (
+                  <div key={item.code} className="product-row">
+                    <span><b>{item.name}</b><small>{item.code} · {fmtKg(kgPerUnit)}/{unitLabel}</small></span>
+                    <div className="stepper">
+                      <button type="button" disabled={locked} onClick={() => updateQuantity(item.code, quantity - 1)}>−</button>
+                      <input
+                        type="number"
+                        min="0"
+                        max="9999"
+                        aria-label={`Số ${unitLabel} ${item.name}`}
+                        disabled={locked}
+                        value={quantity}
+                        onChange={(event) => updateQuantity(item.code, Number(event.target.value || 0))}
+                      />
+                      <button type="button" disabled={locked} onClick={() => updateQuantity(item.code, quantity + 1)}>+</button>
+                    </div>
+                    <em>{fmtKg(quantity * kgPerUnit)}</em>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="total-line"><span>Tổng sản lượng</span><b>{fmtKg(totalKg(form.items))}</b></div>
           {error && <p className="form-error">{error}</p>}
-          <Button busy={busy} disabled={locked} onClick={save}>Lưu thay đổi</Button>
+          <Button busy={busy} disabled={locked || form.items.length === 0} onClick={save}>Xác nhận sản lượng</Button>
         </Card>
       )}
     </div>

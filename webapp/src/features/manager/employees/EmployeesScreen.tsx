@@ -2,10 +2,10 @@ import {useCallback, useEffect, useState} from "react";
 import {ApiError, api} from "../../../api/client";
 import {Button, Card, Chip, Metric, ScreenState, SectionTitle} from "../../../components/ui";
 import {fmtDate, fmtTime, todayVN} from "../../../lib/date-vn";
-import {fmtMoney} from "../../../lib/format";
+import {fmtKg, fmtMoney} from "../../../lib/format";
 import {hapticNotify} from "../../../lib/haptic";
 import {getCurrentLocation} from "../../../lib/location";
-import type {EmployeeLocationHistory, ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
+import type {CatalogProduct, EmployeeLocationHistory, ManagedEmployee, RateHistory, WorkLocation} from "../../../types/api";
 import {errorText, useBackButton} from "../shared";
 
 const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK === "1";
@@ -66,7 +66,7 @@ export function EmployeesScreen() {
   const [active, setActive] = useState<"all" | "active" | "locked">("all");
   const [locationFilter, setLocationFilter] = useState<number | "all">("all");
   const [locations, setLocations] = useState<WorkLocation[]>([]);
-  const [subtab, setSubtab] = useState<"employees" | "locations">(scenario.startsWith(mockKey("manager", "locations")) ? "locations" : "employees");
+  const [subtab, setSubtab] = useState<"employees" | "locations" | "products">(scenario.startsWith(mockKey("manager", "locations")) ? "locations" : "employees");
   const [screen, setScreen] = useState<"list" | "add" | "detail">(scenario === mockKey("manager", "employee", "add") ? "add" : scenario.startsWith(mockKey("manager", "employee", "assign")) || scenario === mockKey("manager", "employee", "detail") ? "detail" : "list");
   const [selected, setSelected] = useState<ManagedEmployee | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
@@ -98,6 +98,7 @@ export function EmployeesScreen() {
   if (screen === "add") return <EmployeeAddScreen onBack={() => setScreen("list")} onCreated={(url) => setInvite(url)} invite={invite} />;
   if (screen === "detail") return <EmployeeDetailScreen employee={selected || rows[0]} onBack={() => setScreen("list")} onChanged={load} />;
   if (subtab === "locations") return <LocationsScreen onBack={() => setSubtab("employees")} canAssignEmployees />;
+  if (subtab === "products") return <ProductCatalogScreen onBack={() => setSubtab("employees")} />;
   if (loading) return <ScreenState kind="loading" title="Đang tải nhân viên" />;
   if (error) return <ScreenState kind="error" title="Không tải được nhân viên" message={error} onRetry={load} />;
 
@@ -123,6 +124,7 @@ export function EmployeesScreen() {
       <div className="segmented">
         <button className={(subtab as string) === "employees" ? "active" : ""} onClick={() => setSubtab("employees")}>Nhân viên</button>
         <button className={(subtab as string) === "locations" ? "active" : ""} onClick={() => setSubtab("locations")}>Kho</button>
+        <button className={(subtab as string) === "products" ? "active" : ""} onClick={() => setSubtab("products")}>Sản phẩm</button>
       </div>
       <Card>
         <label className="form-field">Tìm kiếm<input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Tên hoặc mã nhân viên" /></label>
@@ -326,6 +328,117 @@ export function LocationsScreen({onBack, canAssignEmployees = true}: {onBack: ()
       {!canAssignEmployees && <p className="muted">Giám đốc chỉ quản lý danh mục kho, không phân công nhân viên tại đây.</p>}
     </Card>)}
   </div>;
+}
+
+export function ProductCatalogScreen({onBack}: {onBack: () => void}) {
+  const [rows, setRows] = useState<CatalogProduct[]>([]);
+  const [form, setForm] = useState({code: "", name: "", kg_per_unit: "1", unit_label: "Túi", scope: "all"});
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await api.get<CatalogProduct[]>("/catalog/products"));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => void load(), [load]);
+
+  const create = async () => {
+    if (!form.code.trim() || !form.name.trim()) {
+      setError("Vui lòng nhập mã và tên sản phẩm.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post<CatalogProduct>("/catalog/products", {
+        code: form.code.trim().toUpperCase(),
+        name: form.name.trim(),
+        kg_per_unit: Number(form.kg_per_unit),
+        unit_label: form.unit_label.trim() || "Túi",
+        unit_code: "BAG",
+        scope: form.scope,
+        location_ids: [],
+        employee_ids: [],
+      });
+      setForm({code: "", name: "", kg_per_unit: "1", unit_label: "Túi", scope: "all"});
+      hapticNotify("success");
+      await load();
+    } catch (err) {
+      hapticNotify("error");
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async (product: CatalogProduct) => {
+    try {
+      await api.post<CatalogProduct>(`/catalog/products/${product.id}/${product.is_active ? "deactivate" : "reactivate"}`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const remove = async (product: CatalogProduct) => {
+    if (!window.confirm(`Xóa sản phẩm ${product.name}? Chỉ dùng cho sản phẩm tạo nhầm chưa từng xuất hiện trong sản lượng.`)) return;
+    try {
+      await api.delete<CatalogProduct>(`/catalog/products/${product.id}`);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const scopeLabel = (product: CatalogProduct) => {
+    if (product.scope === "all") return "Chung";
+    const {location_count, employee_count, applied_employee_count} = product.scope_summary;
+    if (applied_employee_count === 0) return "Chưa áp dụng cho ai";
+    return `${location_count} kho · ${employee_count} nhân viên`;
+  };
+
+  return (
+    <div className="screen-stack">
+      <Button tone="ghost" className="back-button" onClick={onBack}>← Quay lại</Button>
+      <SectionTitle eyebrow="Sản phẩm" title="Danh mục sản phẩm" />
+      <Card>
+        <SectionTitle title="Thêm sản phẩm" />
+        <label className="form-field">Mã sản phẩm<input value={form.code} onChange={(event) => setForm({...form, code: event.target.value.toUpperCase()})} placeholder="VD: BOT" /></label>
+        <label className="form-field">Tên sản phẩm<input value={form.name} onChange={(event) => setForm({...form, name: event.target.value})} placeholder="Bột" /></label>
+        <div className="two-col">
+          <label className="form-field">Kg/đơn vị<input type="number" min="0.001" step="0.001" value={form.kg_per_unit} onChange={(event) => setForm({...form, kg_per_unit: event.target.value})} /></label>
+          <label className="form-field">Đơn vị<input value={form.unit_label} onChange={(event) => setForm({...form, unit_label: event.target.value})} /></label>
+        </div>
+        <label className="form-field">Áp dụng cho<select value={form.scope} onChange={(event) => setForm({...form, scope: event.target.value})}><option value="all">Tất cả nhân viên</option><option value="restricted">Chỉ kho và nhân viên được chọn</option></select></label>
+        {form.scope === "restricted" && <p className="muted">Sản phẩm chưa áp dụng cho ai. Bạn có thể lưu trước rồi chỉnh phạm vi chi tiết ở bản hoàn thiện.</p>}
+        {error && <p className="form-error">{error}</p>}
+        <Button busy={busy} disabled={!form.code.trim() || !form.name.trim()} onClick={create}>Tạo sản phẩm</Button>
+      </Card>
+      {rows.map((product) => (
+        <Card key={product.id} className="manager-card">
+          <div className="manager-row">
+            <div>
+              <b>{product.code} · {product.name}</b>
+              <small>{fmtKg(product.kg_per_unit)}/{product.unit_label}</small>
+            </div>
+            <Chip tone={product.is_active ? "success" : "danger"}>{product.is_active ? "Đang sản xuất" : "Ngừng SX"}</Chip>
+          </div>
+          <div className="chip-row">
+            <Chip tone={product.scope_summary.applied_employee_count === 0 && product.scope !== "all" ? "warning" : "neutral"}>{scopeLabel(product)}</Chip>
+            {product.used && <Chip tone="info">Đã có dữ liệu</Chip>}
+          </div>
+          <div className="action-row">
+            <Button tone="secondary" onClick={() => void toggleActive(product)}>{product.is_active ? "Ngừng" : "Kích hoạt"}</Button>
+            {!product.used && <Button tone="danger" onClick={() => void remove(product)}>Xóa tạo nhầm</Button>}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
 }
 
 function EmployeeAddScreen({onBack, onCreated, invite}: {onBack: () => void; onCreated: (url: string) => void; invite: string | null}) {

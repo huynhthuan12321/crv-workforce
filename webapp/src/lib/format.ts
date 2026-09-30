@@ -9,6 +9,10 @@ export function fmtKg(value = 0): string {
   }).format(value)} kg`;
 }
 
-export function totalKg<T extends {bags: number; kg?: number; kg_per_bag?: number}>(items: T[]): number {
-  return items.reduce((sum, item) => sum + (item.kg ?? item.bags * (item.kg_per_bag ?? 0)), 0);
+export function totalKg<T extends {bags?: number; quantity?: number; kg?: number | null; total_kg?: number | null; kg_per_bag?: number | null; kg_per_unit?: number | null}>(items: T[]): number {
+  return items.reduce((sum, item) => {
+    const quantity = item.quantity ?? item.bags ?? 0;
+    const kgPerUnit = item.kg_per_unit ?? item.kg_per_bag ?? 0;
+    return sum + (item.total_kg ?? item.kg ?? quantity * kgPerUnit);
+  }, 0);
 }
