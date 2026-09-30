@@ -65,7 +65,7 @@
 | Sốt trắng | 2 |
 | Bơ | 2 |
 
-- Bảng quy đổi **cố định**.
+- Bảng quy đổi theo danh mục sản phẩm ở 2.20 (không cố định; mỗi dòng sản lượng lưu snapshot mã, tên, đơn vị, quy cách, thứ tự).
 - Nhân viên được sửa bản khai trong **10 phút kể từ thời điểm phiên được đóng**:
   - Nhân viên tự ra ca → 10 phút kể từ lúc bấm Ra ca.
   - Phiên quên ra ca do quản lý/giám đốc đóng → 10 phút kể từ lúc quản lý/giám đốc xử lý xong; bot nhắn nhân viên vào khai sản lượng ngay khi phiên được đóng.
@@ -399,6 +399,159 @@ Ví dụ: 08:00–10:00 @30k = 60.000; 13:00–17:00 @40k = 160.000 → 220.000�
 #### 2.18.8. Ngoài phạm vi 2.18
 
 Khoản điều chỉnh lương (SPEC 2.19 cũ) đã BỎ – không triển khai. Sửa lương phiên đã qua / đợt đã duyệt: không làm trong hệ thống.
+
+### 2.20. Danh mục sản phẩm
+
+Trạng thái: **ĐÃ CHỐT (bản 2, 29/09/2026) – đóng băng trước khi code.** Mọi thay đổi phải sửa `docs/spec/2.20_san_pham.md` trước.
+Liên quan: 2.6 (sản lượng), 2.12 (báo cáo), 2.14 (Lark), 2.17 (điểm làm việc).
+**Phụ thuộc:** triển khai bằng migration riêng (0008), KHÔNG gộp với 2.17; nhưng phạm vi theo kho yêu cầu 2.17 (`work_locations`, `work_sessions.work_location_id`) đã có.
+
+#### 2.20.0. Quy tắc gốc
+
+**R-CATALOG.** Danh mục sản phẩm là dữ liệu có vòng đời và không được dùng trạng thái hiện tại để diễn giải lại sản lượng lịch sử. Khi một phiên kết thúc và cửa sổ khai sản lượng được mở, hệ thống xác định tập sản phẩm áp dụng cho phiên đó. Mỗi dòng sản lượng lưu snapshot mã, tên, đơn vị, quy cách kg/đơn vị, thứ tự và tổng khối lượng. Mọi thay đổi tên, quy cách, thứ tự, phạm vi hoặc trạng thái sản phẩm sau đó không được làm thay đổi dữ liệu lịch sử của phiên.
+
+**R-REPORT.** Sản phẩm ngừng sản xuất không xuất hiện trong các phiên mới nhưng vẫn xuất hiện trong lịch sử và báo cáo khi kỳ được xem có dữ liệu của sản phẩm đó. Nếu một sản phẩm có nhiều quy cách trong cùng kỳ báo cáo, hệ thống phải tính tổng kg từ snapshot từng dòng và không được suy ngược tổng kg từ quy cách hiện tại.
+
+**R-SUBMIT.** "Đã chốt danh mục" (dòng quantity = 0 được tạo sẵn) KHÁC "đã khai sản lượng". Chỉ bản khai có trạng thái `submitted` mới là số liệu nhân viên xác nhận; báo cáo phải phân biệt "0 túi đã xác nhận" với "chưa khai".
+
+Nhất quán kiến trúc: kho snapshot theo phiên (2.17) · đơn giá snapshot theo phiên (2.18) · sản phẩm snapshot theo dòng sản lượng (2.20).
+
+#### 2.20.1. Mô hình dữ liệu
+
+##### 2.20.1.1 `products` (nâng cấp bảng hiện có)
+
+| Cột | Ghi chú |
+|---|---|
+| id | |
+| code | UNIQUE trên toàn bảng (kể cả đã ngừng / đã xóa), BẤT BIẾN, KHÔNG tái sử dụng. Chỉ chữ HOA, số, gạch dưới |
+| name | trim, không rỗng; unique trong các sản phẩm chưa xóa |
+| unit_code / unit_label | mặc định `BAG` / `Túi` |
+| kg_per_unit | NUMERIC(10,3) > 0, giới hạn 0,001–1.000. Không dùng float |
+| sort_order | integer, KHÔNG cần unique; sắp theo sort_order → code |
+| is_active | `false` = Ngừng sản xuất |
+| scope | `all` (Chung – MẶC ĐỊNH khi tạo) \| `restricted` |
+| deleted_at, deleted_by | soft-delete "tạo nhầm" – ẩn khỏi giao diện nghiệp vụ, vẫn giữ để audit |
+| created_by, created_at, updated_at | |
+
+Đổi tên cột hiện có `kg_per_bag` → `kg_per_unit`.
+
+**Đơn vị:** V1 chỉ hỗ trợ đơn vị ĐẾM NGUYÊN (BAG; về sau BOX, PCS dùng được ngay). Đơn vị có phần lẻ như KG cần đổi `quantity` sang NUMERIC ở phiên bản sau – chưa hỗ trợ.
+
+##### 2.20.1.2 Phạm vi áp dụng (khi scope = restricted)
+
+- `product_location_scopes` (product_id, location_id; unique) – mọi nhân viên có PHIÊN tại kho đó.
+- `product_employee_scopes` (product_id, employee_id; unique; chỉ nhân viên role employee).
+- Là **HỢP** (OR), không phải giao: áp dụng nếu kho của phiên nằm trong các kho được chọn HOẶC nhân viên nằm trong danh sách riêng.
+- restricted không chọn ai → không ai thấy; UI cảnh báo "Sản phẩm chưa áp dụng cho ai" (vẫn cho lưu).
+- Kho ngừng dùng / nhân viên bị khóa vẫn giữ trong phạm vi (không tự xóa); UI ghi "(ngừng dùng)" / "(đã khóa)".
+- Đổi phạm vi: audit `product_scope_changed` (cũ → mới).
+
+##### 2.20.1.3 `output_logs` – thêm trạng thái
+
+| Cột | Ghi chú |
+|---|---|
+| status | `pending` (vừa chốt danh mục, chưa gửi) · `submitted` (nhân viên đã bấm Xác nhận ít nhất 1 lần) · `locked_unsubmitted` (hết 10 phút mà chưa gửi) |
+| opened_at | = thời điểm phiên đóng |
+| submitted_at | lần gửi cuối cùng (sửa trong 10 phút cập nhật lại) |
+| locked_at | giữ nguyên |
+
+- `pending` + `locked_at <= now` được coi là `locked_unsubmitted`: API đọc trả trạng thái hiệu dụng; worker định kỳ ghi hẳn `locked_unsubmitted` (không bắt buộc tức thời).
+
+##### 2.20.1.4 `output_items` – snapshot (BẤT BIẾN về catalog)
+
+| Cột | Ghi chú |
+|---|---|
+| product_id | giữ FK |
+| product_code_snapshot, product_name_snapshot | |
+| unit_code_snapshot, unit_label_snapshot | |
+| kg_per_unit_snapshot | NUMERIC(10,3) |
+| sort_order_snapshot | INTEGER NOT NULL |
+| quantity | đổi tên từ `bags`, INTEGER ≥ 0 |
+| total_kg | **GENERATED ALWAYS AS (quantity × kg_per_unit_snapshot) STORED** – DB đảm bảo không lệch |
+
+Không bao giờ tính lại total_kg lịch sử từ `products`.
+
+#### 2.20.2. Chốt danh mục cho phiên
+
+- Tại thời điểm phiên ĐÓNG (ra ca HOẶC quản lý đóng phiên quên – cùng transaction tạo output_log `pending`), tạo sẵn 1 `output_item` quantity = 0 cho mỗi sản phẩm áp dụng, kèm đủ snapshot (gồm sort_order_snapshot).
+- Sản phẩm áp dụng = chưa xóa VÀ is_active VÀ (scope = all HOẶC `work_location_id` CỦA PHIÊN thuộc product_location_scopes HOẶC nhân viên thuộc product_employee_scopes), xét tại thời điểm phiên đóng. Kho hiện tại của nhân viên KHÔNG được dùng.
+- Không có sản phẩm nào áp dụng → không tạo dòng; output_log vẫn tạo; form hiện "Không có sản phẩm cần khai cho ca này" (không cần gửi, trạng thái giữ pending rồi hết hạn – báo cáo không tính là "chưa khai").
+- Trong 10 phút: nhân viên chỉ CẬP NHẬT quantity các dòng đã tạo và bấm **Xác nhận sản lượng** → `submitted`. Sản phẩm ngoài danh sách chốt → `PRODUCT_NOT_IN_SESSION`.
+- Mọi thay đổi catalog (ngừng, đổi tên, đổi quy cách, đổi thứ tự, đổi phạm vi) sau thời điểm phiên đóng KHÔNG ảnh hưởng phiên đó.
+- Form hiển thị ORDER BY sort_order_snapshot, product_code_snapshot – KHÔNG đọc products.sort_order.
+
+#### 2.20.3. Thao tác danh mục (QUẢN LÝ + GIÁM ĐỐC)
+
+| Thao tác | Điều kiện | Audit |
+|---|---|---|
+| Thêm | mã hợp lệ, chưa từng tồn tại (kể cả đã xóa) | `product_created` |
+| Sửa tên / quy cách / thứ tự | mã không đổi được. Đổi quy cách → cảnh báo "Chỉ áp dụng cho các phiên kết thúc từ bây giờ." | `product_updated` (old → new từng trường) |
+| Sửa phạm vi | | `product_scope_changed` |
+| Ngừng sản xuất | không điều kiện (cho phép 0 sản phẩm đang sản xuất) | `product_deactivated` |
+| Kích hoạt lại | | `product_reactivated` |
+| Xóa sản phẩm tạo nhầm | chỉ khi CHƯA từng xuất hiện trong output_items – không phụ thuộc quantity hay bản khai đã gửi hay chưa (`PRODUCT_IN_USE`). Soft-delete | `product_deleted` |
+
+- Đã bỏ `LAST_ACTIVE_PRODUCT`.
+- "Đã sử dụng" = đã có ít nhất 1 dòng output_items (kể cả quantity 0 tạo sẵn). Sản phẩm đã sử dụng chỉ được Ngừng sản xuất.
+
+#### 2.20.4. Giao thức khóa
+
+| Thao tác | Khóa |
+|---|---|
+| Sửa / ngừng / kích hoạt / xóa / sửa phạm vi sản phẩm | `products` FOR UPDATE (1 sản phẩm) trước khi ghi `products` hoặc bảng scope |
+| Đóng phiên (ra ca / đóng phiên quên) | sau khi khóa phiên như hiện có: `SELECT … FROM products WHERE chưa xóa AND is_active ORDER BY id FOR SHARE`, rồi mới đọc bảng scope và tạo dòng |
+
+- Hai phía cùng khóa bản ghi `products` → phiên nhận TRỌN catalog cũ hoặc TRỌN catalog mới, không lẫn.
+- Luôn khóa theo `id ASC` để tránh deadlock khi nhiều phiên đóng đồng thời. Không thao tác catalog nào khóa `work_sessions` → không tạo vòng chờ với 2.17/2.18.
+
+#### 2.20.5. Báo cáo và hiển thị
+
+- Gom theo `product_code_snapshot` (khóa nhóm lịch sử). Tên hiện hành chỉ là nhãn nhận diện ở bảng tổng hợp; chi tiết phiên và lịch sử luôn dùng `product_name_snapshot`. Nếu trong kỳ có tên snapshot khác tên hiện hành → ghi "tên trong kỳ: …".
+- Dòng hiển thị:
+  | Bộ lọc | Sản phẩm hiện |
+  |---|---|
+  | Không lọc | mọi sản phẩm đang sản xuất (kể cả 0) + mọi sản phẩm có dữ liệu trong kỳ (ngừng SX → nhãn "Ngừng SX") |
+  | Theo kho K | sản phẩm đang sản xuất hiện áp dụng cho K (scope all hoặc có K) + mọi sản phẩm có dữ liệu ở phiên thuộc K trong kỳ |
+  | Theo nhân viên E | sản phẩm hiện áp dụng cho E (all / kho hiện tại của E / riêng E) + mọi sản phẩm E có dữ liệu trong kỳ |
+  Sản phẩm đã xóa không bao giờ hiện.
+- Chỉ cộng dòng của output_log `submitted`. Thêm chỉ số "Phiên chưa khai sản lượng: N" (locked_unsubmitted có ≥ 1 sản phẩm áp dụng).
+- Quy cách:
+  - Mọi dòng cùng 1 kg_per_unit_snapshot → "Bột · 1,2 kg/Túi · 200 Túi · 240 kg".
+  - Nhiều mức → "Bột · 200 Túi · 270 kg · ⚠ 2 quy cách trong kỳ"; chi tiết từng mức. Không hiện một quy cách duy nhất.
+- Lịch sử nhân viên / chi tiết lương: hiển thị snapshot; phiên chưa khai ghi "Chưa khai sản lượng". Đơn vị lấy từ unit_label_snapshot, không hard-code "túi".
+
+#### 2.20.6. Lark / outbox
+
+`output_submitted` (chỉ phát khi submitted) mỗi dòng gửi snapshot:
+
+```json
+{"product_id": 1, "product_code": "BOT", "product_name": "Bột", "unit": "Túi",
+ "quantity": 20, "kg_per_unit": 1.2, "total_kg": 24.0, "sort_order": 1}
+```
+
+`schema_version` = 3. `event_id` vẫn là khóa idempotency duy nhất.
+
+#### 2.20.7. Quyền và giao diện
+
+- Giám đốc được quản lý danh mục nhưng KHÔNG có quyền nhân viên. Thêm `GET /api/catalog/employee-options` (quản lý + giám đốc) chỉ trả: id, code, name, location_id, location_name (không đơn giá, không Telegram, không link mời, không trạng thái khóa ngoài cờ is_active). Không mở `/api/employees` cho giám đốc.
+- Quản lý: tab "Quản lý" → tab con "Nhân viên | Kho | Sản phẩm" (kiểm 360px).
+- Giám đốc: mục "Danh mục" (Kho, Sản phẩm) trong header/menu Báo cáo.
+- Danh sách sản phẩm: mã, tên, "1,2 kg/Túi", chip Đang sản xuất / Ngừng SX, chip phạm vi ("Chung" / "2 kho · 3 nhân viên" / "Chưa áp dụng cho ai"), nút lên/xuống đổi thứ tự, lọc theo phạm vi.
+- Form thêm/sửa: mã khóa sau khi tạo; mục "Áp dụng cho": ● Tất cả nhân viên (mặc định) / ○ Chỉ kho và nhân viên được chọn; câu giải thích "Sản phẩm áp dụng nếu nhân viên làm tại một trong các kho được chọn HOẶC nằm trong danh sách nhân viên được chọn riêng."; chọn kho (chip) + tìm chọn nhân viên; "Hiện áp dụng cho N nhân viên".
+- Chi tiết nhân viên (quản lý): "Sản phẩm được khai" (chung / qua kho / riêng) – chỉ xem.
+- Form khai sản lượng: nút **Xác nhận sản lượng**; sau khi gửi hiện "Đã xác nhận lúc HH:MM"; hết giờ mà chưa gửi hiện "Đã khóa – chưa khai".
+- "Xóa sản phẩm tạo nhầm" chỉ hiện khi chưa từng dùng. Số kg dùng dấu phẩy thập phân.
+
+#### 2.20.8. Migration 0008
+
+- products: đổi tên kg_per_bag → kg_per_unit, NUMERIC(10,3), thêm unit_*, scope = 'all', is_active = true, deleted_*.
+- Tạo product_location_scopes, product_employee_scopes.
+- output_logs: thêm status, opened_at; backfill: có submitted_at → `submitted`; không có và locked_at <= now → `locked_unsubmitted`; còn lại → `pending`.
+- output_items: đổi tên bags → quantity; thêm snapshot + sort_order_snapshot, backfill từ products hiện tại.
+- total_kg: TRƯỚC khi đổi sang cột generated, kiểm tra mọi dòng cũ `kg = bags × kg_per_bag`; có dòng lệch → DỪNG migration và in danh sách (không tự sửa). Không lệch → đổi `kg` thành `total_kg` GENERATED STORED.
+- Phiên cũ thiếu dòng cho một số sản phẩm: KHÔNG tạo thêm.
+- Seed: chỉ tạo 7 sản phẩm mặc định khi bảng rỗng; không ghi đè.
+- Đếm số dòng output_items / output_logs trước và sau bằng nhau; downgrade chạy được.
 
 ### 2.21. Thông báo và tin nhắn riêng
 
