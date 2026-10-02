@@ -10,6 +10,8 @@ from source.telegram.keyboards.webapp import app_tab_url
 user_keyboard_router = Router(name=__name__)
 
 _BUTTONS = {
+    "📱 Chấm công": ("Mở Chấm công", "attendance"),
+    "📱 Mở app": ("Mở ứng dụng", "home"),
     "📋 Lịch sử": ("Mở Lịch sử", "history"),
     "⚠️ Cần xử lý": ("Mở Cần xử lý", "review"),
     "💰 Duyệt lương": ("Mở Duyệt lương", "payroll"),

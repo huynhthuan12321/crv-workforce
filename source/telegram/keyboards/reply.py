@@ -1,13 +1,13 @@
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
-from source.config import settings
 from source.enums import EmployeeRole
 
 
 def role_reply_keyboard(role: EmployeeRole | str) -> ReplyKeyboardMarkup:
     role_value = role.value if isinstance(role, EmployeeRole) else str(role)
-    app_button = KeyboardButton(text="📱 Chấm công" if role_value == EmployeeRole.employee.value else "📱 Mở app",
-                                web_app=WebAppInfo(url=settings.webapp.url))
+    # KHÔNG dùng web_app ở ReplyKeyboard: Telegram không gửi initData cho Mini App mở từ nút này
+    # → API không xác thực được. Nút chữ → bot trả nút inline (có initData) – xem handlers/user/keyboard.py.
+    app_button = KeyboardButton(text="📱 Chấm công" if role_value == EmployeeRole.employee.value else "📱 Mở app")
     if role_value == EmployeeRole.employee.value:
         rows = [[app_button, KeyboardButton(text="📋 Lịch sử")],
                 [KeyboardButton(text="💬 Nhắn quản lý")]]
