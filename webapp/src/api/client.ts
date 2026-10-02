@@ -24,7 +24,23 @@ class ApiClient {
 
   async login(): Promise<AuthData> {
     if (USE_MOCK) return (await getMockApi()).login();
-    const initData = window.Telegram?.WebApp?.initData || "";
+    let initData = window.Telegram?.WebApp?.initData || "";
+
+    // Một số máy (Android chậm) cấp initData trễ vài trăm ms sau khi tải trang → chờ tối đa ~3 giây.
+    for (let i = 0; i < 10 && !initData; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      window.Telegram?.WebApp?.ready?.();
+      initData = window.Telegram?.WebApp?.initData || "";
+    }
+
+    if (!initData) {
+      throw new ApiError(
+        "INITDATA_INVALID",
+        "Telegram chưa cấp phiên đăng nhập. Vui lòng đóng app và mở lại từ nút Chấm công hoặc nút trong tin nhắn bot.",
+        401,
+      );
+    }
+
     const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     try {
       return await this.publicPost<AuthData>("/auth/session", {init_data: initData});

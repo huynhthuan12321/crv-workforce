@@ -11,6 +11,7 @@ const accessErrorMessages: Record<string, string> = {
   INVITE_EXPIRED: "Link mời không hợp lệ hoặc đã hết hạn. Vui lòng xin quản lý gửi link mới.",
   INVITE_USED: "Link mời này đã được dùng. Nếu bạn đã liên kết, hãy mở app từ nút Chấm công trong bot.",
   NOT_REGISTERED: "Tài khoản Telegram này chưa được cấp quyền. Liên hệ quản lý để nhận link mời.",
+  INITDATA_INVALID: "Telegram chưa cấp phiên đăng nhập. Vui lòng đóng app và mở lại từ nút Chấm công hoặc nút trong tin nhắn bot.",
 };
 
 const accessErrorTitles: Record<string, string> = {
@@ -18,6 +19,7 @@ const accessErrorTitles: Record<string, string> = {
   INVITE_EXPIRED: "Link mời đã hết hạn",
   INVITE_USED: "Link mời đã được dùng",
   NOT_REGISTERED: "Chưa được cấp quyền",
+  INITDATA_INVALID: "Chưa nhận được phiên đăng nhập",
 };
 
 export function accessMessageForError({code, status}: AccessError) {
