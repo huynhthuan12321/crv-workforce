@@ -1,0 +1,6 @@
+# Chỉ dùng khi chạy test / migration check trên máy dev (scripts/test_all.*).
+# Mở cổng DB ra localhost để pytest và alembic trên máy kết nối được.
+# KHÔNG dùng trên VPS.
+services:
+  db:
+    ports: ["127.0.0.1:5432:5432"]

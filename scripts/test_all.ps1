@@ -2,9 +2,9 @@ $ErrorActionPreference = "Stop"
 
 function Ensure-Db($Name) {
     $user = if ($env:DB__USER) { $env:DB__USER } else { "default" }
-    $exists = docker compose exec -T db psql -U $user -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$Name'"
+    $exists = docker compose -f docker-compose.yml -f docker-compose.test.yml exec -T db psql -U $user -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$Name'"
     if (("$exists").Trim() -ne "1") {
-        docker compose exec -T db createdb -U $user $Name
+        docker compose -f docker-compose.yml -f docker-compose.test.yml exec -T db createdb -U $user $Name
     }
 }
 
@@ -26,7 +26,7 @@ function Run-Capture($Name, $Command) {
     return $text
 }
 
-docker compose up -d db redis
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d db redis
 Ensure-Db "crv_workforce_test"
 Ensure-Db "crv_workforce_migcheck"
 
