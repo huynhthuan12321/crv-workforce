@@ -25,7 +25,7 @@ services:
       redis: {condition: service_healthy}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-m", "source.utils.bot_healthcheck"]
+      test: ["CMD", "python", "/app/source/utils/bot_healthcheck.py"]
       interval: 30s
       timeout: 15s
       retries: 3
