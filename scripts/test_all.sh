@@ -5,9 +5,9 @@ ensure_db() {
   local name="$1"
   local user="${DB__USER:-default}"
   local exists
-  exists="$(docker compose exec -T db psql -U "$user" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$name'" | tr -d '[:space:]')"
+  exists="$(docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T db psql -U "$user" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$name'" | tr -d '[:space:]')"
   if [[ "$exists" != "1" ]]; then
-    docker compose exec -T db createdb -U "$user" "$name"
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T db createdb -U "$user" "$name"
   fi
 }
 
@@ -32,7 +32,7 @@ run_capture() {
   printf '%s' "$output"
 }
 
-docker compose up -d db redis
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
 ensure_db "crv_workforce_test"
 ensure_db "crv_workforce_migcheck"
 

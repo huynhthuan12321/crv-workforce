@@ -44,11 +44,11 @@ python -m compileall -q source migrations scripts tests
 python -m pytest
 
 # Test tích hợp PostgreSQL (cần DB thật)
-docker compose up -d db
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 $env:TEST_DATABASE_URL="postgresql+asyncpg://default:password@localhost:5432/crv_workforce_test"
 python -m pytest -m postgres
 
-Lưu ý production: PostgreSQL chỉ được bind localhost, ví dụ `127.0.0.1:5432:5432`; không bao giờ để cổng DB mở ra `0.0.0.0`. GĐ9 sẽ kiểm tra `.env` trên VPS bắt buộc đặt `DB__PASSWORD` mạnh, không dùng mặc định `password`.
+Lưu ý production: docker-compose.yml KHÔNG publish cổng DB. Cổng DB chỉ mở ra localhost qua docker-compose.dev.yml khi chạy test trên máy dev; không bao giờ để cổng DB mở ra `0.0.0.0`. Cổng nginx lấy từ NGINX_BIND (VPS sau Caddy: NGINX_BIND=127.0.0.1:8088). Không sửa tay docker-compose.yml trên VPS. GĐ9 sẽ kiểm tra `.env` trên VPS bắt buộc đặt `DB__PASSWORD` mạnh, không dùng mặc định `password`.
 
 # Docker compose
 docker compose config --quiet
