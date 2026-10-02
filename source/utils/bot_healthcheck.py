@@ -1,17 +1,31 @@
 import asyncio
-import sys
+import os
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+import asyncpg
 
-from source.config import settings
+
+CONNECT_TIMEOUT_SECONDS = 3
+QUERY_TIMEOUT_SECONDS = 3
+
+
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
 
 
 async def _main() -> int:
-    engine = create_async_engine(settings.db.postgres_connection(), pool_pre_ping=True)
+    conn = None
     try:
-        async with engine.connect() as conn:
-            healthy = await conn.scalar(text(
+        conn = await asyncpg.connect(
+            host=_env("DB__HOST", "db"),
+            port=int(_env("DB__PORT", "5432")),
+            user=_env("DB__USER", "default"),
+            password=_env("DB__PASSWORD", "password"),
+            database=_env("DB__NAME", "crv_workforce"),
+            timeout=CONNECT_TIMEOUT_SECONDS,
+            command_timeout=QUERY_TIMEOUT_SECONDS,
+        )
+        healthy = await asyncio.wait_for(
+            conn.fetchval(
                 """
                 SELECT EXISTS (
                     SELECT 1
@@ -20,12 +34,15 @@ async def _main() -> int:
                       AND beat_at >= now() - interval '2 minutes'
                 )
                 """
-            ))
-            return 0 if healthy else 1
+            ),
+            timeout=QUERY_TIMEOUT_SECONDS,
+        )
+        return 0 if healthy else 1
     except Exception:
         return 1
     finally:
-        await engine.dispose()
+        if conn is not None:
+            await conn.close()
 
 
 def main() -> None:

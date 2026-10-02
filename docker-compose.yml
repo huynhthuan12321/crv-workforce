@@ -27,7 +27,7 @@ services:
     healthcheck:
       test: ["CMD", "python", "-m", "source.utils.bot_healthcheck"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
       start_period: 60s
     networks: [app-network]
